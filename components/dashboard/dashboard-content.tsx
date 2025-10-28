@@ -21,6 +21,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog"
+import { VisuallyHidden } from "@/components/ui/visually-hidden"
 import useSWR from "swr"
 
 const fetcher = async () => {
@@ -130,10 +131,12 @@ export function DashboardContent() {
                 </Button>
               </SheetTrigger>
               <SheetContent side="right" className="w-[280px]">
-                {/* <SheetHeader>
-                  <SheetTitle>Menu</SheetTitle>
-                </SheetHeader> */}
-                <div className="mt-6 flex flex-col gap-6 p-4">
+                <SheetHeader>
+                  <VisuallyHidden>
+                    <SheetTitle>Account Menu</SheetTitle>
+                  </VisuallyHidden>
+                </SheetHeader>
+                <div className="flex flex-col gap-6 p-2">
                   <div className="flex flex-col gap-2">
                     <span className="text-xs font-medium text-muted-foreground">Signed in as</span>
                     <span className="text-sm font-medium">{user?.email}</span>
