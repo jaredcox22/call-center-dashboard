@@ -9,7 +9,18 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { CircularGauge } from "./circular-gauge"
 import { EmployeeIndicator } from "./employee-indicator"
 import { FeaturedMetricCard } from "./featured-metric-card"
-import { LogOut, RefreshCw, Moon, Sun } from "lucide-react"
+import { LogOut, RefreshCw, Moon, Sun, Menu } from "lucide-react"
+import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetTrigger } from "@/components/ui/sheet"
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog"
 import useSWR from "swr"
 
 const fetcher = async () => {
@@ -51,6 +62,8 @@ export function DashboardContent() {
   const [timePeriod, setTimePeriod] = useState("today")
   const [selectedEmployee, setSelectedEmployee] = useState("all")
   const [dashboardType, setDashboardType] = useState<"setters" | "confirmers">("setters")
+  const [isMenuOpen, setIsMenuOpen] = useState(false)
+  const [showLogoutDialog, setShowLogoutDialog] = useState(false)
 
   const { data, error, mutate } = useSWR("dashboard-data", fetcher, {
     refreshInterval: 5000,
@@ -63,6 +76,16 @@ export function DashboardContent() {
     if (value < thresholds[2]) return "#eab308" // gold
     if (value < thresholds[3]) return "#22c55e" // green
     return "#3b82f6" // blue
+  }
+
+  const handleLogoutClick = () => {
+    setShowLogoutDialog(true)
+    setIsMenuOpen(false) // Close mobile menu if open
+  }
+
+  const handleConfirmLogout = () => {
+    setShowLogoutDialog(false)
+    logout()
   }
 
   if (!data) {
@@ -80,22 +103,69 @@ export function DashboardContent() {
       {/* Header */}
       <header className="border-b border-border bg-card">
         <div className="container mx-auto flex items-center justify-between px-4 py-4">
-          <h1 className="text-2xl font-bold">Call Center Dashboard</h1>
-          <div className="flex items-center gap-4">
-            <span className="text-sm text-muted-foreground">{user?.email}</span>
+          <h1 className="text-lg font-bold md:text-2xl">Call Center Dashboard</h1>
+          <div className="flex items-center gap-2 md:gap-4">
+            {/* Desktop: Show email */}
+            <span className="hidden text-sm text-muted-foreground md:inline-block">{user?.email}</span>
+            
+            {/* Always visible: Theme & Refresh */}
             <Button variant="ghost" size="icon" onClick={toggleTheme}>
               {theme === "dark" ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
             </Button>
             <Button variant="ghost" size="icon" onClick={() => mutate()}>
               <RefreshCw className="h-4 w-4" />
             </Button>
-            <Button variant="outline" onClick={logout}>
+            
+            {/* Desktop: Show logout button */}
+            <Button variant="outline" className="hidden md:flex" onClick={handleLogoutClick}>
               <LogOut className="mr-2 h-4 w-4" />
               Logout
             </Button>
+            
+            {/* Mobile: Show hamburger menu */}
+            <Sheet open={isMenuOpen} onOpenChange={setIsMenuOpen}>
+              <SheetTrigger asChild>
+                <Button variant="ghost" size="icon" className="md:hidden">
+                  <Menu className="h-5 w-5" />
+                </Button>
+              </SheetTrigger>
+              <SheetContent side="right" className="w-[280px]">
+                {/* <SheetHeader>
+                  <SheetTitle>Menu</SheetTitle>
+                </SheetHeader> */}
+                <div className="mt-6 flex flex-col gap-6 p-4">
+                  <div className="flex flex-col gap-2">
+                    <span className="text-xs font-medium text-muted-foreground">Signed in as</span>
+                    <span className="text-sm font-medium">{user?.email}</span>
+                  </div>
+                  <Button variant="destructive" onClick={handleLogoutClick} className="w-full">
+                    <LogOut className="mr-2 h-4 w-4" />
+                    Logout
+                  </Button>
+                </div>
+              </SheetContent>
+            </Sheet>
           </div>
         </div>
       </header>
+
+      {/* Logout Confirmation Dialog */}
+      <AlertDialog open={showLogoutDialog} onOpenChange={setShowLogoutDialog}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Confirm Logout</AlertDialogTitle>
+            <AlertDialogDescription>
+              Are you sure you want to log out? You will need to sign in again to access the dashboard.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction onClick={handleConfirmLogout} className="bg-destructive text-destructive-foreground hover:bg-destructive/90">
+              Logout
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
 
       <main className="container mx-auto p-6">
         {/* Combined Filters and Toggle */}
