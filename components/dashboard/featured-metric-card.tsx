@@ -22,15 +22,15 @@ export function FeaturedMetricCard({ title, value, unit, color, subtitle }: Feat
   }, [value])
 
   return (
-    <Card className="p-6">
+    <Card className="p-8 min-h-[200px] flex items-center justify-center">
       <div className="text-center">
-        <h2 className="mb-3 text-base font-semibold text-muted-foreground">{title}</h2>
+        <h2 className="mb-4 text-lg font-semibold text-muted-foreground">{title}</h2>
         <div
-          className="mb-2 text-5xl font-bold transition-all duration-1000 ease-out md:text-6xl"
+          className="mb-3 text-5xl font-bold transition-all duration-1000 ease-out md:text-6xl lg:text-7xl"
           style={{ color }}
         >
           {animatedValue}
-          <span className="ml-1 text-2xl md:text-3xl">{unit}</span>
+          <span className="ml-1 text-2xl md:text-3xl lg:text-4xl">{unit}</span>
         </div>
         {subtitle && <p className="text-sm text-muted-foreground">{subtitle}</p>}
       </div>

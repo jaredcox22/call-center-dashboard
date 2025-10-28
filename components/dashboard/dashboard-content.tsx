@@ -99,9 +99,9 @@ export function DashboardContent() {
 
       <main className="container mx-auto p-6">
         {/* Combined Filters and Toggle */}
-        <Card className="mb-4 p-3">
+        <Card className="mb-4 p-3 bg-transparent shadow-none border-none dark:shadow-none dark:border-none">
           <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-2 justify-center md:justify-start">
               <Button
                 variant={dashboardType === "setters" ? "default" : "outline"}
                 onClick={() => setDashboardType("setters")}
@@ -119,36 +119,32 @@ export function DashboardContent() {
                 Confirmers
               </Button>
             </div>
-            <div className="flex flex-wrap gap-3">
-              <div className="flex-1 min-w-[160px]">
-                <Select value={timePeriod} onValueChange={setTimePeriod}>
-                  <SelectTrigger className="h-9">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="today">Today</SelectItem>
-                    <SelectItem value="yesterday">Yesterday</SelectItem>
-                    <SelectItem value="week">This Week</SelectItem>
-                    <SelectItem value="month">This Month</SelectItem>
-                    <SelectItem value="custom">Custom Range</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-              <div className="flex-1 min-w-[160px]">
-                <Select value={selectedEmployee} onValueChange={setSelectedEmployee}>
-                  <SelectTrigger className="h-9">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="all">All Employees</SelectItem>
-                    {employees.map((emp) => (
-                      <SelectItem key={emp.id} value={emp.id}>
-                        {emp.name}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
+            <div className="flex gap-2 justify-evenly md:justify-start">
+              <Select value={timePeriod} onValueChange={setTimePeriod}>
+                <SelectTrigger className="h-9 w-[140px]">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="today">Today</SelectItem>
+                  <SelectItem value="yesterday">Yesterday</SelectItem>
+                  <SelectItem value="week">This Week</SelectItem>
+                  <SelectItem value="month">This Month</SelectItem>
+                  <SelectItem value="custom">Custom Range</SelectItem>
+                </SelectContent>
+              </Select>
+              <Select value={selectedEmployee} onValueChange={setSelectedEmployee}>
+                <SelectTrigger className="h-9 w-[140px]">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All Employees</SelectItem>
+                  {employees.map((emp) => (
+                    <SelectItem key={emp.id} value={emp.id}>
+                      {emp.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
             </div>
           </div>
         </Card>
@@ -156,7 +152,7 @@ export function DashboardContent() {
         {dashboardType === "setters" ? (
           <>
             {/* Featured Metrics */}
-            <div className="mb-4 grid gap-4 md:grid-cols-3">
+            <div className="mb-4 grid gap-6 grid-cols-1 sm:grid-cols-3">
               <FeaturedMetricCard
                 title="Horsepower"
                 value={settersMetrics.horsepower}
@@ -181,7 +177,7 @@ export function DashboardContent() {
             </div>
 
             {/* Setters Metrics Gauges */}
-            <div className="mb-4 grid gap-3 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 2xl:grid-cols-6">
+            <div className="mb-4 grid grid-cols-2 gap-3 md:grid-cols-4 lg:grid-cols-4 xl:grid-cols-5 2xl:grid-cols-6">
               <CircularGauge
                 title="Dials Per Hour"
                 value={settersMetrics.dialsPerHour}
