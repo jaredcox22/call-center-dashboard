@@ -179,7 +179,7 @@ export function DashboardContent() {
                 variant={dashboardType === "setters" ? "default" : "outline"}
                 onClick={() => setDashboardType("setters")}
                 size="sm"
-                className="min-w-[120px]"
+                className="min-w-[120px] dark:border-white/10"
               >
                 Setters
               </Button>
@@ -187,14 +187,14 @@ export function DashboardContent() {
                 variant={dashboardType === "confirmers" ? "default" : "outline"}
                 onClick={() => setDashboardType("confirmers")}
                 size="sm"
-                className="min-w-[120px]"
+                className="min-w-[120px] dark:border-white/10"
               >
                 Confirmers
               </Button>
             </div>
             <div className="flex gap-2 justify-evenly md:justify-start">
               <Select value={timePeriod} onValueChange={setTimePeriod}>
-                <SelectTrigger className="h-9 w-[140px]">
+                <SelectTrigger className="h-9 w-[140px] dark:border-white/10">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
@@ -206,7 +206,7 @@ export function DashboardContent() {
                 </SelectContent>
               </Select>
               <Select value={selectedEmployee} onValueChange={setSelectedEmployee}>
-                <SelectTrigger className="h-9 w-[140px]">
+                <SelectTrigger className="h-9 w-[140px] dark:border-white/10">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
