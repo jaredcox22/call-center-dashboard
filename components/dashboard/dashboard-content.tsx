@@ -250,7 +250,7 @@ export function DashboardContent() {
             </div>
 
             {/* Setters Metrics Gauges */}
-            <div className="mb-4 grid grid-cols-2 gap-3 md:grid-cols-4 lg:grid-cols-4 xl:grid-cols-5 2xl:grid-cols-6">
+            <div className="mb-4 grid grid-cols-2 gap-3 md:grid-cols-4 2xl:grid-cols-8">
               <CircularGauge
                 title="Dials Per Hour"
                 value={settersMetrics.dialsPerHour}
@@ -320,7 +320,7 @@ export function DashboardContent() {
         ) : (
           <>
             {/* Confirmers Metrics Gauges */}
-            <div className="mb-4 grid gap-4 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5">
+            <div className="mb-4 grid gap-4 grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 xl:grid-cols-5">
               <CircularGauge
                 title="Contact Rate"
                 value={confirmersMetrics.contactRate}
