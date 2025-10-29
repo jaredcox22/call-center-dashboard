@@ -115,8 +115,8 @@ const transformApiData = (apiData: any, selectedEmployee: string) => {
     (pitchRate * 0.4) + (conversionRate * 0.6)
   )
   
-  // Calculate grade card (overall performance)
-  const gradeCard = Math.round(
+  // Calculate score card (overall performance)
+  const scoreCard = Math.round(
     (connectionRate * 0.3) + (pitchRate * 0.3) + (conversionRate * 0.4)
   )
   
@@ -124,7 +124,6 @@ const transformApiData = (apiData: any, selectedEmployee: string) => {
     employees: Array.from(employees.entries()).map(([name, stats], index) => ({
       id: String(index + 1),
       name,
-      status: 'active',
       dials: (stats as any).dials,
       connections: (stats as any).connections,
       conversions: (stats as any).conversions,
@@ -136,7 +135,7 @@ const transformApiData = (apiData: any, selectedEmployee: string) => {
       conversionRate,
       horsepower,
       skillScore,
-      gradeCard,
+      scoreCard,
       conversionQualified,
       conversionUnqualified,
       grossIssue,
@@ -349,14 +348,14 @@ export function DashboardContent() {
                 title="Horsepower"
                 value={settersMetrics.horsepower}
                 unit="HP"
-                color={getGaugeColor(settersMetrics.horsepower, [200, 300, 400, 500])}
+                color={getGaugeColor(settersMetrics.horsepower, [29.5, 39.4, 50.3, 65.6])}
                 subtitle="Combined Performance Score"
               />
               <FeaturedMetricCard
                 title="Skill Score"
                 value={settersMetrics.skillScore}
                 unit="pts"
-                color={getGaugeColor(settersMetrics.skillScore, [50, 65, 75, 85])}
+                color={getGaugeColor(settersMetrics.skillScore, [29.5, 39.4, 50.3, 65.6])}
                 subtitle="Overall Skill Rating"
               />
               <FeaturedMetricCard
@@ -374,7 +373,7 @@ export function DashboardContent() {
                 title="Dials Per Hour"
                 value={settersMetrics.dialsPerHour}
                 max={100}
-                color={getGaugeColor(settersMetrics.dialsPerHour, [30, 40, 50, 60])}
+                color={getGaugeColor(settersMetrics.dialsPerHour, [22, 25, 29, 34])}
                 unit="dials"
                 size="small"
               />
@@ -382,7 +381,7 @@ export function DashboardContent() {
                 title="Connection %"
                 value={settersMetrics.connectionRate}
                 max={100}
-                color={getGaugeColor(settersMetrics.connectionRate, [20, 30, 40, 50])}
+                color={getGaugeColor(settersMetrics.connectionRate, [15, 17, 19, 21])}
                 unit="%"
                 size="small"
               />
@@ -390,7 +389,7 @@ export function DashboardContent() {
                 title="Pitch %"
                 value={settersMetrics.pitchRate}
                 max={100}
-                color={getGaugeColor(settersMetrics.pitchRate, [25, 35, 45, 55])}
+                color={getGaugeColor(settersMetrics.pitchRate, [90, 95, 97, 99])}
                 unit="%"
                 size="small"
               />
@@ -398,15 +397,15 @@ export function DashboardContent() {
                 title="Conversion %"
                 value={settersMetrics.conversionRate}
                 max={100}
-                color={getGaugeColor(settersMetrics.conversionRate, [10, 20, 30, 40])}
+                color={getGaugeColor(settersMetrics.conversionRate, [22, 27, 33, 40])}
                 unit="%"
                 size="small"
               />
               <CircularGauge
-                title="Grade Card"
-                value={settersMetrics.gradeCard}
+                title="ScoreCard"
+                value={settersMetrics.scoreCard}
                 max={100}
-                color={getGaugeColor(settersMetrics.gradeCard, [60, 70, 80, 90])}
+                color={getGaugeColor(settersMetrics.scoreCard, [22, 25, 29, 34])}
                 unit="%"
                 size="small"
               />
@@ -414,7 +413,7 @@ export function DashboardContent() {
                 title="Conversion % (Qualified)"
                 value={settersMetrics.conversionQualified}
                 max={100}
-                color={getGaugeColor(settersMetrics.conversionQualified, [15, 25, 35, 45])}
+                color={getGaugeColor(settersMetrics.conversionQualified, [22, 27, 33, 40])}
                 unit="%"
                 size="small"
               />
@@ -422,7 +421,7 @@ export function DashboardContent() {
                 title="Conversion % (Un-Qualified)"
                 value={settersMetrics.conversionUnqualified}
                 max={100}
-                color={getGaugeColor(settersMetrics.conversionUnqualified, [5, 15, 25, 35])}
+                color={getGaugeColor(settersMetrics.conversionUnqualified, [22, 27, 33, 40])}
                 unit="%"
                 size="small"
               />
@@ -430,7 +429,7 @@ export function DashboardContent() {
                 title="Gross Issue"
                 value={settersMetrics.grossIssue}
                 max={100}
-                color={getGaugeColor(settersMetrics.grossIssue, [25, 35, 45, 55])}
+                color={getGaugeColor(settersMetrics.grossIssue, [22, 27, 33, 40])}
                 unit="%"
                 size="small"
               />
@@ -487,7 +486,6 @@ export function DashboardContent() {
               <EmployeeIndicator
                 key={employee.id}
                 name={employee.name}
-                status={employee.status as "active" | "break" | "offline"}
                 dials={employee.dials}
                 connections={employee.connections}
                 conversions={employee.conversions}
