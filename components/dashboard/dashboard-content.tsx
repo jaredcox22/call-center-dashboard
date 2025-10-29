@@ -22,6 +22,8 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog"
 import { VisuallyHidden } from "@/components/ui/visually-hidden"
+import { useActivityTracker } from "@/hooks/use-activity-tracker"
+import { SessionWarning } from "@/components/session-warning"
 import useSWR from "swr"
 
 const fetcher = async (url: string) => {
@@ -161,6 +163,9 @@ export function DashboardContent() {
   const [isMenuOpen, setIsMenuOpen] = useState(false)
   const [showLogoutDialog, setShowLogoutDialog] = useState(false)
 
+  // Track user activity for session management
+  useActivityTracker()
+
   const apiUrl = buildApiUrl(timePeriod)
 
   const { data: rawData, error, mutate } = useSWR(apiUrl, fetcher, {
@@ -216,6 +221,9 @@ export function DashboardContent() {
 
   return (
     <div className="min-h-screen bg-background">
+      {/* Session Warning */}
+      <SessionWarning />
+      
       {/* Header */}
       <header className="border-b border-border bg-card">
         <div className="container mx-auto flex items-center justify-between px-4 py-4">
