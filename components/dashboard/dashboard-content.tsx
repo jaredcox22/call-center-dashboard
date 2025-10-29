@@ -24,6 +24,7 @@ import {
 import { VisuallyHidden } from "@/components/ui/visually-hidden"
 import { useActivityTracker } from "@/hooks/use-activity-tracker"
 import { SessionWarning } from "@/components/session-warning"
+import { LoadingScreen } from "./loading-screen"
 import useSWR from "swr"
 
 const fetcher = async (url: string) => {
@@ -209,15 +210,29 @@ export function DashboardContent() {
     )
   }
 
-  if (!data) {
-    return (
-      <div className="flex min-h-screen items-center justify-center">
-        <div className="h-8 w-8 animate-spin rounded-full border-4 border-primary border-t-transparent" />
-      </div>
-    )
+  const { employees, settersMetrics, confirmersMetrics } = data || {
+    employees: [],
+    settersMetrics: {
+      dialsPerHour: 0,
+      connectionRate: 0,
+      pitchRate: 0,
+      conversionRate: 0,
+      horsepower: 0,
+      skillScore: 0,
+      scoreCard: 0,
+      conversionQualified: 0,
+      conversionUnqualified: 0,
+      grossIssue: 0,
+      checkoutToDialTime: 0,
+    },
+    confirmersMetrics: {
+      contactRate: 0,
+      grossIssueRate: 0,
+      netIssueRate: 0,
+      oneLegsRate: 0,
+      scorecard: 0,
+    },
   }
-
-  const { employees, settersMetrics, confirmersMetrics } = data
 
   return (
     <div className="min-h-screen bg-background">
@@ -579,6 +594,9 @@ export function DashboardContent() {
           </div>
         </div>
       </main>
+
+      {/* Loading Overlay */}
+      {!data && <LoadingScreen />}
     </div>
   )
 }
