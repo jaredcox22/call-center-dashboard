@@ -302,7 +302,7 @@ export function DashboardContent() {
                 variant={dashboardType === "confirmers" ? "default" : "outline"}
                 onClick={() => setDashboardType("confirmers")}
                 size="sm"
-                className="min-w-[120px] dark:border-white/10 bg-white dark:bg-transparent"
+                className="min-w-[120px] dark:border-white/10"
               >
                 Confirmers
               </Button>
