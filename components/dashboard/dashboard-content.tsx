@@ -302,14 +302,14 @@ export function DashboardContent() {
                 variant={dashboardType === "confirmers" ? "default" : "outline"}
                 onClick={() => setDashboardType("confirmers")}
                 size="sm"
-                className="min-w-[120px] dark:border-white/10"
+                className="min-w-[120px] dark:border-white/10 bg-white dark:bg-transparent"
               >
                 Confirmers
               </Button>
             </div>
             <div className="flex gap-2 justify-evenly md:justify-start">
               <Select value={timePeriod} onValueChange={setTimePeriod}>
-                <SelectTrigger className="h-9 w-[140px] dark:border-white/10">
+                <SelectTrigger className="h-9 w-[140px] dark:border-white/10 bg-white dark:bg-transparent">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
@@ -324,7 +324,7 @@ export function DashboardContent() {
                 </SelectContent>
               </Select>
               <Select value={selectedEmployee} onValueChange={setSelectedEmployee}>
-                <SelectTrigger className="h-9 w-[140px] dark:border-white/10">
+                <SelectTrigger className="h-9 w-[140px] dark:border-white/10 bg-white dark:bg-transparent">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
