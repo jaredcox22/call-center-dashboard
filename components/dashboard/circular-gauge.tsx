@@ -1,7 +1,16 @@
 "use client"
 
 import { Card } from "@/components/ui/card"
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
+import { Info } from "lucide-react"
 import { useEffect, useState } from "react"
+
+interface MetricRange {
+  label: string
+  min: number
+  max?: number
+  color: string
+}
 
 interface CircularGaugeProps {
   title: string
@@ -11,9 +20,10 @@ interface CircularGaugeProps {
   unit: string
   inverted?: boolean
   size?: "small" | "medium" | "large"
+  ranges?: MetricRange[]
 }
 
-export function CircularGauge({ title, value, max, color, unit, inverted = false, size = "medium" }: CircularGaugeProps) {
+export function CircularGauge({ title, value, max, color, unit, inverted = false, size = "medium", ranges }: CircularGaugeProps) {
   const [animatedValue, setAnimatedValue] = useState(0)
 
   useEffect(() => {
@@ -65,7 +75,37 @@ export function CircularGauge({ title, value, max, color, unit, inverted = false
   const strokeDashoffset = circumference - (percentage / 100) * circumference
 
   return (
-    <Card className={config.padding}>
+    <Card className={`${config.padding} relative`}>
+      {ranges && ranges.length > 0 && (
+        <Popover>
+          <PopoverTrigger asChild>
+            <button className="absolute right-2 top-2 text-muted-foreground hover:text-foreground transition-colors">
+              <Info className="h-3.5 w-3.5" />
+            </button>
+          </PopoverTrigger>
+          <PopoverContent className="w-64" align="end">
+            <div className="space-y-2">
+              <h4 className="font-semibold text-sm">Performance Ranges</h4>
+              <div className="space-y-1.5">
+                {ranges.map((range, index) => (
+                  <div key={index} className="flex items-center justify-between text-xs">
+                    <div className="flex items-center gap-2">
+                      <div
+                        className="h-3 w-3 rounded-full"
+                        style={{ backgroundColor: range.color }}
+                      />
+                      <span className="font-medium">{range.label}</span>
+                    </div>
+                    <span className="text-muted-foreground">
+                      {range.min}{unit}{range.max !== undefined ? ` - ${range.max}${unit}` : '+'}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </PopoverContent>
+        </Popover>
+      )}
       <h3 className={`text-center font-medium text-muted-foreground ${config.titleClass}`}>{title}</h3>
       <div className={`relative mx-auto ${config.gaugeSize}`}>
         <svg className="h-full w-full -rotate-90 transform">

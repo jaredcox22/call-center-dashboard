@@ -350,6 +350,13 @@ export function DashboardContent() {
                 unit="HP"
                 color={getGaugeColor(settersMetrics.horsepower, [29.5, 39.4, 50.3, 65.6])}
                 subtitle="Combined Performance Score"
+                ranges={[
+                  { label: "Bad", min: 0, max: 29, color: "#ef4444" },
+                  { label: "Average", min: 30, max: 39, color: "#f97316" },
+                  { label: "Good", min: 40, max: 50, color: "#eab308" },
+                  { label: "Excellent", min: 51, max: 65, color: "#22c55e" },
+                  { label: "Elite", min: 66, color: "#3b82f6" },
+                ]}
               />
               <FeaturedMetricCard
                 title="Skill Score"
@@ -357,6 +364,13 @@ export function DashboardContent() {
                 unit="pts"
                 color={getGaugeColor(settersMetrics.skillScore, [29.5, 39.4, 50.3, 65.6])}
                 subtitle="Overall Skill Rating"
+                ranges={[
+                  { label: "Bad", min: 0, max: 29, color: "#ef4444" },
+                  { label: "Average", min: 30, max: 39, color: "#f97316" },
+                  { label: "Good", min: 40, max: 50, color: "#eab308" },
+                  { label: "Excellent", min: 51, max: 65, color: "#22c55e" },
+                  { label: "Elite", min: 66, color: "#3b82f6" },
+                ]}
               />
               <FeaturedMetricCard
                 title="Checkout to Dial Time"
@@ -364,6 +378,13 @@ export function DashboardContent() {
                 unit="s"
                 color={getGaugeColor(settersMetrics.checkoutToDialTime, [90, 60, 45, 30])}
                 subtitle="Speed Metric"
+                ranges={[
+                  { label: "Elite", min: 0, max: 29, color: "#3b82f6" },
+                  { label: "Excellent", min: 30, max: 44, color: "#22c55e" },
+                  { label: "Good", min: 45, max: 59, color: "#eab308" },
+                  { label: "Average", min: 60, max: 89, color: "#f97316" },
+                  { label: "Bad", min: 90, color: "#ef4444" },
+                ]}
               />
             </div>
 
@@ -374,8 +395,15 @@ export function DashboardContent() {
                 value={settersMetrics.dialsPerHour}
                 max={100}
                 color={getGaugeColor(settersMetrics.dialsPerHour, [22, 25, 29, 34])}
-                unit="dials"
+                unit=""
                 size="small"
+                ranges={[
+                  { label: "Bad", min: 0, max: 21, color: "#ef4444" },
+                  { label: "Average", min: 22, max: 24, color: "#f97316" },
+                  { label: "Good", min: 25, max: 28, color: "#eab308" },
+                  { label: "Excellent", min: 29, max: 33, color: "#22c55e" },
+                  { label: "Elite", min: 34, color: "#3b82f6" },
+                ]}
               />
               <CircularGauge
                 title="Connection %"
@@ -384,6 +412,13 @@ export function DashboardContent() {
                 color={getGaugeColor(settersMetrics.connectionRate, [15, 17, 19, 21])}
                 unit="%"
                 size="small"
+                ranges={[
+                  { label: "Bad", min: 0, max: 14, color: "#ef4444" },
+                  { label: "Average", min: 15, max: 16, color: "#f97316" },
+                  { label: "Good", min: 17, max: 18, color: "#eab308" },
+                  { label: "Excellent", min: 19, max: 20, color: "#22c55e" },
+                  { label: "Elite", min: 21, color: "#3b82f6" },
+                ]}
               />
               <CircularGauge
                 title="Pitch %"
@@ -392,6 +427,13 @@ export function DashboardContent() {
                 color={getGaugeColor(settersMetrics.pitchRate, [90, 95, 97, 99])}
                 unit="%"
                 size="small"
+                ranges={[
+                  { label: "Bad", min: 0, max: 89, color: "#ef4444" },
+                  { label: "Average", min: 90, max: 94, color: "#f97316" },
+                  { label: "Good", min: 95, max: 96, color: "#eab308" },
+                  { label: "Excellent", min: 97, max: 98, color: "#22c55e" },
+                  { label: "Elite", min: 99, color: "#3b82f6" },
+                ]}
               />
               <CircularGauge
                 title="Conversion %"
@@ -400,6 +442,13 @@ export function DashboardContent() {
                 color={getGaugeColor(settersMetrics.conversionRate, [22, 27, 33, 40])}
                 unit="%"
                 size="small"
+                ranges={[
+                  { label: "Bad", min: 0, max: 21, color: "#ef4444" },
+                  { label: "Average", min: 22, max: 26, color: "#f97316" },
+                  { label: "Good", min: 27, max: 32, color: "#eab308" },
+                  { label: "Excellent", min: 33, max: 39, color: "#22c55e" },
+                  { label: "Elite", min: 40, color: "#3b82f6" },
+                ]}
               />
               <CircularGauge
                 title="ScoreCard"
@@ -408,6 +457,13 @@ export function DashboardContent() {
                 color={getGaugeColor(settersMetrics.scoreCard, [22, 25, 29, 34])}
                 unit="%"
                 size="small"
+                ranges={[
+                  { label: "Bad", min: 0, max: 21, color: "#ef4444" },
+                  { label: "Average", min: 22, max: 24, color: "#f97316" },
+                  { label: "Good", min: 25, max: 28, color: "#eab308" },
+                  { label: "Excellent", min: 29, max: 33, color: "#22c55e" },
+                  { label: "Elite", min: 34, color: "#3b82f6" },
+                ]}
               />
               <CircularGauge
                 title="Conversion % (Qualified)"
@@ -416,6 +472,13 @@ export function DashboardContent() {
                 color={getGaugeColor(settersMetrics.conversionQualified, [22, 27, 33, 40])}
                 unit="%"
                 size="small"
+                ranges={[
+                  { label: "Bad", min: 0, max: 21, color: "#ef4444" },
+                  { label: "Average", min: 22, max: 26, color: "#f97316" },
+                  { label: "Good", min: 27, max: 32, color: "#eab308" },
+                  { label: "Excellent", min: 33, max: 39, color: "#22c55e" },
+                  { label: "Elite", min: 40, color: "#3b82f6" },
+                ]}
               />
               <CircularGauge
                 title="Conversion % (Un-Qualified)"
@@ -424,6 +487,13 @@ export function DashboardContent() {
                 color={getGaugeColor(settersMetrics.conversionUnqualified, [22, 27, 33, 40])}
                 unit="%"
                 size="small"
+                ranges={[
+                  { label: "Bad", min: 0, max: 21, color: "#ef4444" },
+                  { label: "Average", min: 22, max: 26, color: "#f97316" },
+                  { label: "Good", min: 27, max: 32, color: "#eab308" },
+                  { label: "Excellent", min: 33, max: 39, color: "#22c55e" },
+                  { label: "Elite", min: 40, color: "#3b82f6" },
+                ]}
               />
               <CircularGauge
                 title="Gross Issue"
@@ -432,6 +502,13 @@ export function DashboardContent() {
                 color={getGaugeColor(settersMetrics.grossIssue, [22, 27, 33, 40])}
                 unit="%"
                 size="small"
+                ranges={[
+                  { label: "Bad", min: 0, max: 21, color: "#ef4444" },
+                  { label: "Average", min: 22, max: 26, color: "#f97316" },
+                  { label: "Good", min: 27, max: 32, color: "#eab308" },
+                  { label: "Excellent", min: 33, max: 39, color: "#22c55e" },
+                  { label: "Elite", min: 40, color: "#3b82f6" },
+                ]}
               />
             </div>
           </>
