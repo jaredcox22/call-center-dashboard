@@ -24,7 +24,7 @@ export function LoadingScreen() {
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center backdrop-blur-sm p-4">
-      <Card className="w-full max-w-md p-8 shadow-2xl bg-black outline-4">
+      <Card className="w-full max-w-md p-8 shadow-2xl dark:bg-black outline-4">
         <div className="flex flex-col items-center space-y-6">
           {/* Animated Icon */}
           <div className="relative">

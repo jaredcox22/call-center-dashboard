@@ -45,15 +45,19 @@ const buildApiUrl = (dateRange: string) => {
   return `${baseUrl}?${params.toString()}`
 }
 
-const transformApiData = (apiData: any, selectedEmployee: string) => {
+const transformApiData = (apiData: any, selectedEmployee: string, dashboardType: 'setters' | 'confirmers') => {
+  // Use the appropriate calls array based on dashboard type
+  const callsKey = dashboardType === 'setters' ? 'settersCalls' : 'confirmersCalls'
+  const allCalls = apiData[callsKey] || []
+  
   // Filter data by employee if not "all"
-  let filteredCalls = apiData.calls
-  let filteredHours = apiData.hours
+  let filteredCalls = allCalls
+  let filteredHours = apiData.hours || []
   let filteredStl = apiData.stl || []
   
   if (selectedEmployee !== 'all') {
-    filteredCalls = apiData.calls.filter((call: any) => call.employee === selectedEmployee)
-    filteredHours = apiData.hours.filter((h: any) => h.employee === selectedEmployee)
+    filteredCalls = allCalls.filter((call: any) => call.employee === selectedEmployee)
+    filteredHours = apiData.hours?.filter((h: any) => h.employee === selectedEmployee) || []
     filteredStl = filteredStl.filter((s: any) => s.employee === selectedEmployee)
   }
   
@@ -176,17 +180,30 @@ export function DashboardContent() {
     dedupingInterval: 10000,
   })
 
-  const data = rawData ? transformApiData(rawData, selectedEmployee) : null
+  const data = rawData ? transformApiData(rawData, selectedEmployee, dashboardType) : null
+
+  // Get unique employees from the appropriate calls array based on dashboard type
+  const availableEmployees = rawData ? (() => {
+    const callsKey = dashboardType === 'setters' ? 'settersCalls' : 'confirmersCalls'
+    const calls = rawData[callsKey] || []
+    const uniqueEmployees = new Set<string>()
+    calls.forEach((call: any) => {
+      if (call.employee) {
+        uniqueEmployees.add(call.employee)
+      }
+    })
+    return Array.from(uniqueEmployees).sort()
+  })() : []
 
   // Auto-reset employee filter if selected employee doesn't exist in current data
   useEffect(() => {
-    if (selectedEmployee !== 'all' && rawData?.hours) {
-      const employeeExists = rawData.hours.some((emp: any) => emp.employee === selectedEmployee)
+    if (selectedEmployee !== 'all' && availableEmployees.length > 0) {
+      const employeeExists = availableEmployees.includes(selectedEmployee)
       if (!employeeExists) {
         setSelectedEmployee('all')
       }
     }
-  }, [rawData, selectedEmployee])
+  }, [rawData, selectedEmployee, dashboardType, availableEmployees])
 
   const getGaugeColor = (value: number, thresholds: number[]) => {
     if (value < thresholds[0]) return "#ef4444" // red
@@ -362,9 +379,9 @@ export function DashboardContent() {
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="all">All Employees</SelectItem>
-                  {rawData?.hours?.map((emp: any) => (
-                    <SelectItem key={emp.employee} value={emp.employee}>
-                      {emp.employee}
+                  {availableEmployees.map((employeeName: string) => (
+                    <SelectItem key={employeeName} value={employeeName}>
+                      {employeeName}
                     </SelectItem>
                   ))}
                 </SelectContent>
