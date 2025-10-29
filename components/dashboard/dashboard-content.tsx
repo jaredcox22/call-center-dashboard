@@ -1,6 +1,6 @@
 "use client"
 
-import { useState } from "react"
+import { useState, useEffect } from "react"
 import { useAuth } from "@/contexts/auth-context"
 import { useTheme } from "@/contexts/theme-context"
 import { Button } from "@/components/ui/button"
@@ -177,6 +177,16 @@ export function DashboardContent() {
   })
 
   const data = rawData ? transformApiData(rawData, selectedEmployee) : null
+
+  // Auto-reset employee filter if selected employee doesn't exist in current data
+  useEffect(() => {
+    if (selectedEmployee !== 'all' && rawData?.hours) {
+      const employeeExists = rawData.hours.some((emp: any) => emp.employee === selectedEmployee)
+      if (!employeeExists) {
+        setSelectedEmployee('all')
+      }
+    }
+  }, [rawData, selectedEmployee])
 
   const getGaugeColor = (value: number, thresholds: number[]) => {
     if (value < thresholds[0]) return "#ef4444" // red
