@@ -64,15 +64,16 @@ const transformApiData = (apiData: any, selectedEmployee: string, dashboardType:
   const callsKey = dashboardType === 'setters' ? 'settersCalls' : 'confirmersCalls'
   const allCalls = apiData[callsKey] || []
   
+  // Keep team-wide STL data (checkout to dial time is a TEAM metric)
+  const teamStl = apiData.stl || []
+  
   // Filter data by employee if not "all"
   let filteredCalls = allCalls
   let filteredHours = apiData.hours || []
-  let filteredStl = apiData.stl || []
   
   if (selectedEmployee !== 'all') {
     filteredCalls = allCalls.filter((call: any) => call.employee === selectedEmployee)
     filteredHours = apiData.hours?.filter((h: any) => h.employee === selectedEmployee) || []
-    filteredStl = filteredStl.filter((s: any) => s.employee === selectedEmployee)
   }
   
   // Calculate metrics from raw call data
@@ -112,9 +113,9 @@ const transformApiData = (apiData: any, selectedEmployee: string, dashboardType:
   // Calculate total hours
   const totalHours = filteredHours.reduce((sum: number, h: any) => sum + h.hours, 0) || 1
   
-  // Calculate average STL (checkout to dial time) in seconds
-  const avgStl = filteredStl.length > 0 
-    ? filteredStl.reduce((sum: number, s: any) => sum + s.stl, 0) / filteredStl.length
+  // Calculate average STL (checkout to dial time) in seconds - TEAM metric only
+  const avgStl = teamStl.length > 0 
+    ? teamStl.reduce((sum: number, s: any) => sum + s.stl, 0) / teamStl.length
     : 60
   
   // Calculate metrics
@@ -262,6 +263,15 @@ export function DashboardContent() {
     if (value < thresholds[2]) return "#eab308" // gold
     if (value < thresholds[3]) return "#22c55e" // green
     return "#3b82f6" // blue
+  }
+
+  // For metrics where LOWER is better (like checkout to dial time)
+  const getInverseGaugeColor = (value: number, thresholds: number[]) => {
+    if (value >= thresholds[0]) return "#ef4444" // red (90+)
+    if (value >= thresholds[1]) return "#f97316" // orange (60-89)
+    if (value >= thresholds[2]) return "#eab308" // gold (45-59)
+    if (value >= thresholds[3]) return "#22c55e" // green (30-44)
+    return "#3b82f6" // blue (0-29)
   }
 
   const handleLogoutClick = () => {
@@ -533,8 +543,8 @@ export function DashboardContent() {
               <div className="mb-4 grid gap-6 grid-cols-1 sm:grid-cols-3">
                 {[
                   { title: "Horsepower", subtitle: "Combined Performance Score" },
-                  { title: "Skill Score", subtitle: "Overall Skill Rating" },
-                  { title: "Checkout to Dial Time", subtitle: "Speed Metric" }
+                  { title: "Checkout to Dial Time", subtitle: "Team Metric • Speed" },
+                  { title: "Skill Score", subtitle: "Overall Skill Rating" }
                 ].map((metric, i) => (
                   <Card key={i} className="p-8">
                     <div className="flex flex-col items-center justify-center text-center min-h-[200px]">
@@ -564,6 +574,20 @@ export function DashboardContent() {
                   ]}
                 />
                 <FeaturedMetricCard
+                  title="Checkout to Dial Time"
+                  value={settersMetrics.checkoutToDialTime}
+                  unit="s"
+                  color={getInverseGaugeColor(settersMetrics.checkoutToDialTime, [90, 60, 45, 30])}
+                  subtitle="Team Metric • Speed"
+                  ranges={[
+                    { label: "Elite", min: 0, max: 29, color: "#3b82f6" },
+                    { label: "Excellent", min: 30, max: 44, color: "#22c55e" },
+                    { label: "Good", min: 45, max: 59, color: "#eab308" },
+                    { label: "Average", min: 60, max: 89, color: "#f97316" },
+                    { label: "Bad", min: 90, color: "#ef4444" },
+                  ]}
+                />
+                <FeaturedMetricCard
                   title="Skill Score"
                   value={settersMetrics.skillScore}
                   unit="pts"
@@ -575,20 +599,6 @@ export function DashboardContent() {
                     { label: "Good", min: 40, max: 50, color: "#eab308" },
                     { label: "Excellent", min: 51, max: 65, color: "#22c55e" },
                     { label: "Elite", min: 66, color: "#3b82f6" },
-                  ]}
-                />
-                <FeaturedMetricCard
-                  title="Checkout to Dial Time"
-                  value={settersMetrics.checkoutToDialTime}
-                  unit="s"
-                  color={getGaugeColor(settersMetrics.checkoutToDialTime, [90, 60, 45, 30])}
-                  subtitle="Speed Metric"
-                  ranges={[
-                    { label: "Elite", min: 0, max: 29, color: "#3b82f6" },
-                    { label: "Excellent", min: 30, max: 44, color: "#22c55e" },
-                    { label: "Good", min: 45, max: 59, color: "#eab308" },
-                    { label: "Average", min: 60, max: 89, color: "#f97316" },
-                    { label: "Bad", min: 90, color: "#ef4444" },
                   ]}
                 />
               </div>
