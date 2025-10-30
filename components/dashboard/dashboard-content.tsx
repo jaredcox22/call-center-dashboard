@@ -190,6 +190,7 @@ export function DashboardContent() {
     to: undefined 
   })
   const [datePickerOpen, setDatePickerOpen] = useState(false)
+  const [mobilePickerOpen, setMobilePickerOpen] = useState(false)
 
   // Track user activity for session management
   useActivityTracker()
@@ -246,6 +247,7 @@ export function DashboardContent() {
     if (customDateRange.from && customDateRange.to) {
       setConfirmedDateRange(customDateRange)
       setDatePickerOpen(false)
+      setMobilePickerOpen(false)
     }
   }
 
@@ -406,9 +408,9 @@ export function DashboardContent() {
                 Confirmers
               </Button>
             </div>
-            <div className={`flex gap-2 ${timePeriod === "Custom Dates" ? "justify-center" : "justify-evenly"} md:justify-start`}>
+            <div className="flex gap-2 justify-evenly md:justify-start">
               <Select value={timePeriod} onValueChange={setTimePeriod}>
-                <SelectTrigger className={`h-9 dark:border-white/10 bg-white dark:bg-transparent ${timePeriod === "Custom Dates" ? "w-[100px]" : "w-[140px]"} md:w-[140px]`}>
+                <SelectTrigger className="h-9 dark:border-white/10 bg-white dark:bg-transparent w-[140px]">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
@@ -426,7 +428,7 @@ export function DashboardContent() {
               {timePeriod === "Custom Dates" && (
                 <Popover open={datePickerOpen} onOpenChange={setDatePickerOpen}>
                   <PopoverTrigger asChild>
-                    <Button variant="outline" className={`h-9 dark:border-white/10 bg-white dark:bg-transparent font-normal ${timePeriod === "Custom Dates" ? "w-[125px]" : "w-[140px]"} md:w-[140px]`}>
+                    <Button variant="outline" className="hidden md:flex h-9 dark:border-white/10 bg-white dark:bg-transparent font-normal">
                       <CalendarIcon className="mr-2 h-4 w-4" />
                       {confirmedDateRange.from && confirmedDateRange.to
                         ? `${format(confirmedDateRange.from, "MMM d, yyyy")} - ${format(confirmedDateRange.to, "MMM d, yyyy")}`
@@ -466,7 +468,7 @@ export function DashboardContent() {
                 </Popover>
               )}
               <Select value={selectedEmployee} onValueChange={setSelectedEmployee}>
-                <SelectTrigger className={`h-9 dark:border-white/10 bg-white dark:bg-transparent ${timePeriod === "Custom Dates" ? "w-[100px]" : "w-[140px]"} md:w-[140px]`}>
+                <SelectTrigger className="h-9 dark:border-white/10 bg-white dark:bg-transparent w-[140px]">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
@@ -479,6 +481,48 @@ export function DashboardContent() {
                 </SelectContent>
               </Select>
             </div>
+            {timePeriod === "Custom Dates" && (
+                <Popover open={mobilePickerOpen} onOpenChange={setMobilePickerOpen}>
+                  <PopoverTrigger asChild>
+                    <Button variant="outline" className="flex md:hidden h-9 dark:border-white/10 bg-white dark:bg-transparent font-normal">
+                      <CalendarIcon className="mr-2 h-4 w-4" />
+                      {confirmedDateRange.from && confirmedDateRange.to
+                        ? `${format(confirmedDateRange.from, "MMM d, yyyy")} - ${format(confirmedDateRange.to, "MMM d, yyyy")}`
+                        : "Pick dates"}
+                    </Button>
+                  </PopoverTrigger>
+                  <PopoverContent className="w-auto p-0" align="start">
+                    <Calendar
+                      mode="range"
+                      selected={customDateRange}
+                      onSelect={(range) => {
+                        if (range) {
+                          setCustomDateRange(range)
+                        }
+                      }}
+                      numberOfMonths={1}
+                      showOutsideDays={false}
+                      disabled={(date) => date > new Date()}
+                    />
+                    <div className="flex items-center justify-end gap-2 p-3 border-t">
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={handleDateRangeReset}
+                      >
+                        Reset
+                      </Button>
+                      <Button
+                        size="sm"
+                        onClick={handleDateRangeOk}
+                        disabled={!customDateRange.from || !customDateRange.to}
+                      >
+                        Ok
+                      </Button>
+                    </div>
+                  </PopoverContent>
+                </Popover>
+              )}
           </div>
         </Card>
 
