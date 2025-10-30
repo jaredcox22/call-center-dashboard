@@ -11,7 +11,7 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 import { CircularGauge } from "./circular-gauge"
 import { EmployeeIndicator } from "./employee-indicator"
 import { FeaturedMetricCard } from "./featured-metric-card"
-import { LogOut, RefreshCw, Moon, Sun, Menu, CalendarIcon } from "lucide-react"
+import { LogOut, RefreshCw, Moon, Sun, Menu, CalendarIcon, AlertCircle, Users } from "lucide-react"
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetTrigger } from "@/components/ui/sheet"
 import {
   AlertDialog,
@@ -529,53 +529,95 @@ export function DashboardContent() {
         {dashboardType === "setters" ? (
           <>
             {/* Featured Metrics */}
-            <div className="mb-4 grid gap-6 grid-cols-1 sm:grid-cols-3">
-              <FeaturedMetricCard
-                title="Horsepower"
-                value={settersMetrics.horsepower}
-                unit="HP"
-                color={getGaugeColor(settersMetrics.horsepower, [29.5, 39.4, 50.3, 65.6])}
-                subtitle="Combined Performance Score"
-                ranges={[
-                  { label: "Bad", min: 0, max: 29, color: "#ef4444" },
-                  { label: "Average", min: 30, max: 39, color: "#f97316" },
-                  { label: "Good", min: 40, max: 50, color: "#eab308" },
-                  { label: "Excellent", min: 51, max: 65, color: "#22c55e" },
-                  { label: "Elite", min: 66, color: "#3b82f6" },
-                ]}
-              />
-              <FeaturedMetricCard
-                title="Skill Score"
-                value={settersMetrics.skillScore}
-                unit="pts"
-                color={getGaugeColor(settersMetrics.skillScore, [29.5, 39.4, 50.3, 65.6])}
-                subtitle="Overall Skill Rating"
-                ranges={[
-                  { label: "Bad", min: 0, max: 29, color: "#ef4444" },
-                  { label: "Average", min: 30, max: 39, color: "#f97316" },
-                  { label: "Good", min: 40, max: 50, color: "#eab308" },
-                  { label: "Excellent", min: 51, max: 65, color: "#22c55e" },
-                  { label: "Elite", min: 66, color: "#3b82f6" },
-                ]}
-              />
-              <FeaturedMetricCard
-                title="Checkout to Dial Time"
-                value={settersMetrics.checkoutToDialTime}
-                unit="s"
-                color={getGaugeColor(settersMetrics.checkoutToDialTime, [90, 60, 45, 30])}
-                subtitle="Speed Metric"
-                ranges={[
-                  { label: "Elite", min: 0, max: 29, color: "#3b82f6" },
-                  { label: "Excellent", min: 30, max: 44, color: "#22c55e" },
-                  { label: "Good", min: 45, max: 59, color: "#eab308" },
-                  { label: "Average", min: 60, max: 89, color: "#f97316" },
-                  { label: "Bad", min: 90, color: "#ef4444" },
-                ]}
-              />
-            </div>
+            {!data ? (
+              <div className="mb-4 grid gap-6 grid-cols-1 sm:grid-cols-3">
+                {[
+                  { title: "Horsepower", subtitle: "Combined Performance Score" },
+                  { title: "Skill Score", subtitle: "Overall Skill Rating" },
+                  { title: "Checkout to Dial Time", subtitle: "Speed Metric" }
+                ].map((metric, i) => (
+                  <Card key={i} className="p-8">
+                    <div className="flex flex-col items-center justify-center text-center min-h-[200px]">
+                      <h3 className="text-2xl font-bold mb-1">{metric.title}</h3>
+                      <p className="text-sm text-muted-foreground mb-4">{metric.subtitle}</p>
+                      <AlertCircle className="h-8 w-8 mb-2 text-muted-foreground" />
+                      <p className="text-sm text-muted-foreground">No data available</p>
+                      <p className="text-xs text-muted-foreground mt-1">Select a different date range</p>
+                    </div>
+                  </Card>
+                ))}
+              </div>
+            ) : (
+              <div className="mb-4 grid gap-6 grid-cols-1 sm:grid-cols-3">
+                <FeaturedMetricCard
+                  title="Horsepower"
+                  value={settersMetrics.horsepower}
+                  unit="HP"
+                  color={getGaugeColor(settersMetrics.horsepower, [29.5, 39.4, 50.3, 65.6])}
+                  subtitle="Combined Performance Score"
+                  ranges={[
+                    { label: "Bad", min: 0, max: 29, color: "#ef4444" },
+                    { label: "Average", min: 30, max: 39, color: "#f97316" },
+                    { label: "Good", min: 40, max: 50, color: "#eab308" },
+                    { label: "Excellent", min: 51, max: 65, color: "#22c55e" },
+                    { label: "Elite", min: 66, color: "#3b82f6" },
+                  ]}
+                />
+                <FeaturedMetricCard
+                  title="Skill Score"
+                  value={settersMetrics.skillScore}
+                  unit="pts"
+                  color={getGaugeColor(settersMetrics.skillScore, [29.5, 39.4, 50.3, 65.6])}
+                  subtitle="Overall Skill Rating"
+                  ranges={[
+                    { label: "Bad", min: 0, max: 29, color: "#ef4444" },
+                    { label: "Average", min: 30, max: 39, color: "#f97316" },
+                    { label: "Good", min: 40, max: 50, color: "#eab308" },
+                    { label: "Excellent", min: 51, max: 65, color: "#22c55e" },
+                    { label: "Elite", min: 66, color: "#3b82f6" },
+                  ]}
+                />
+                <FeaturedMetricCard
+                  title="Checkout to Dial Time"
+                  value={settersMetrics.checkoutToDialTime}
+                  unit="s"
+                  color={getGaugeColor(settersMetrics.checkoutToDialTime, [90, 60, 45, 30])}
+                  subtitle="Speed Metric"
+                  ranges={[
+                    { label: "Elite", min: 0, max: 29, color: "#3b82f6" },
+                    { label: "Excellent", min: 30, max: 44, color: "#22c55e" },
+                    { label: "Good", min: 45, max: 59, color: "#eab308" },
+                    { label: "Average", min: 60, max: 89, color: "#f97316" },
+                    { label: "Bad", min: 90, color: "#ef4444" },
+                  ]}
+                />
+              </div>
+            )}
 
             {/* Setters Metrics Gauges */}
-            <div className="mb-4 grid grid-cols-2 gap-3 md:grid-cols-4 2xl:grid-cols-8">
+            {!data ? (
+              <div className="mb-4 grid grid-cols-2 gap-3 md:grid-cols-4 2xl:grid-cols-8">
+                {[
+                  "Dials Per Hour",
+                  "Connection %",
+                  "Pitch %",
+                  "Conversion %",
+                  "ScoreCard",
+                  "Conversion % (Qualified)",
+                  "Conversion % (Un-Qualified)",
+                  "Gross Issue"
+                ].map((title, i) => (
+                  <Card key={i} className="p-4">
+                    <div className="flex flex-col items-center justify-center text-center min-h-[120px]">
+                      <h4 className="text-sm font-medium mb-2">{title}</h4>
+                      <AlertCircle className="h-5 w-5 mb-1 text-muted-foreground" />
+                      <p className="text-xs text-muted-foreground">No data</p>
+                    </div>
+                  </Card>
+                ))}
+              </div>
+            ) : (
+              <div className="mb-4 grid grid-cols-2 gap-3 md:grid-cols-4 2xl:grid-cols-8">
               <CircularGauge
                 title="Dials Per Hour"
                 value={settersMetrics.dialsPerHour}
@@ -697,11 +739,31 @@ export function DashboardContent() {
                 ]}
               />
             </div>
+            )}
           </>
         ) : (
           <>
             {/* Confirmers Metrics Gauges */}
-            <div className="mb-4 grid gap-4 grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 xl:grid-cols-5">
+            {!data ? (
+              <div className="mb-4 grid gap-4 grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 xl:grid-cols-5">
+                {[
+                  "Contact Rate",
+                  "Gross Issue Rate",
+                  "Net Issue Rate",
+                  "1-Leg Rate",
+                  "Scorecard"
+                ].map((title, i) => (
+                  <Card key={i} className="p-4">
+                    <div className="flex flex-col items-center justify-center text-center min-h-[120px]">
+                      <h4 className="text-sm font-medium mb-2">{title}</h4>
+                      <AlertCircle className="h-5 w-5 mb-1 text-muted-foreground" />
+                      <p className="text-xs text-muted-foreground">No data</p>
+                    </div>
+                  </Card>
+                ))}
+              </div>
+            ) : (
+              <div className="mb-4 grid gap-4 grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 xl:grid-cols-5">
               <CircularGauge
                 title="Contact Rate"
                 value={confirmersMetrics.contactRate}
@@ -738,23 +800,36 @@ export function DashboardContent() {
                 unit="pts"
               />
             </div>
+            )}
           </>
         )}
 
         {/* Employee Indicators */}
         <div className="mt-6">
           <h2 className="mb-3 text-xl font-semibold">Team Members</h2>
-          <div className="grid gap-3 md:grid-cols-2 lg:grid-cols-4">
-            {employees.map((employee) => (
-              <EmployeeIndicator
-                key={employee.id}
-                name={employee.name}
-                dials={employee.dials}
-                connections={employee.connections}
-                conversions={employee.conversions}
-              />
-            ))}
-          </div>
+          {employees.length === 0 ? (
+            <Card className="p-8">
+              <div className="flex flex-col items-center justify-center text-center">
+                <Users className="h-12 w-12 mb-3 text-muted-foreground" />
+                <h3 className="text-lg font-medium">No Team Members</h3>
+                <p className="text-sm text-muted-foreground mt-2">
+                  No team member data available for the selected period
+                </p>
+              </div>
+            </Card>
+          ) : (
+            <div className="grid gap-3 md:grid-cols-2 lg:grid-cols-4">
+              {employees.map((employee) => (
+                <EmployeeIndicator
+                  key={employee.id}
+                  name={employee.name}
+                  dials={employee.dials}
+                  connections={employee.connections}
+                  conversions={employee.conversions}
+                />
+              ))}
+            </div>
+          )}
         </div>
       </main>
 
