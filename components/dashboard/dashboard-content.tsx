@@ -6,10 +6,12 @@ import { useTheme } from "@/contexts/theme-context"
 import { Button } from "@/components/ui/button"
 import { Card } from "@/components/ui/card"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
+import { Calendar } from "@/components/ui/calendar"
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { CircularGauge } from "./circular-gauge"
 import { EmployeeIndicator } from "./employee-indicator"
 import { FeaturedMetricCard } from "./featured-metric-card"
-import { LogOut, RefreshCw, Moon, Sun, Menu } from "lucide-react"
+import { LogOut, RefreshCw, Moon, Sun, Menu, CalendarIcon } from "lucide-react"
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetTrigger } from "@/components/ui/sheet"
 import {
   AlertDialog,
@@ -26,6 +28,7 @@ import { useActivityTracker } from "@/hooks/use-activity-tracker"
 import { SessionWarning } from "@/components/session-warning"
 import { LoadingScreen } from "./loading-screen"
 import useSWR from "swr"
+import { format } from "date-fns"
 
 const fetcher = async (url: string) => {
   const response = await fetch(url, {
@@ -39,9 +42,20 @@ const fetcher = async (url: string) => {
   return response.json()
 }
 
-const buildApiUrl = (dateRange: string) => {
+const buildApiUrl = (dateRange: string, customRange?: { from: Date | undefined; to?: Date | undefined }) => {
   const baseUrl = 'https://api.integrityprodserver.com/dashboards/ccHorsepower.php'
   const params = new URLSearchParams({ dateRange })
+  
+  if (dateRange === 'Custom Dates' && customRange?.from && customRange?.to) {
+    // Start date at beginning of day
+    params.append('startDate', format(customRange.from, 'yyyy-MM-dd'))
+    
+    // End date: add one day to make the range inclusive of the entire selected end date
+    const nextDay = new Date(customRange.to)
+    nextDay.setDate(nextDay.getDate() + 1)
+    params.append('endDate', format(nextDay, 'yyyy-MM-dd'))
+  }
+  
   return `${baseUrl}?${params.toString()}`
 }
 
@@ -167,11 +181,26 @@ export function DashboardContent() {
   const [dashboardType, setDashboardType] = useState<"setters" | "confirmers">("setters")
   const [isMenuOpen, setIsMenuOpen] = useState(false)
   const [showLogoutDialog, setShowLogoutDialog] = useState(false)
+  const [customDateRange, setCustomDateRange] = useState<{ from: Date | undefined; to?: Date | undefined }>({ 
+    from: undefined, 
+    to: undefined 
+  })
+  const [confirmedDateRange, setConfirmedDateRange] = useState<{ from: Date | undefined; to?: Date | undefined }>({ 
+    from: undefined, 
+    to: undefined 
+  })
+  const [datePickerOpen, setDatePickerOpen] = useState(false)
 
   // Track user activity for session management
   useActivityTracker()
 
-  const apiUrl = buildApiUrl(timePeriod)
+  // Only build API URL if we have complete date range for custom dates
+  const apiUrl = (() => {
+    if (timePeriod === 'Custom Dates' && (!confirmedDateRange.from || !confirmedDateRange.to)) {
+      return null // Don't fetch until dates are confirmed with Ok button
+    }
+    return buildApiUrl(timePeriod, confirmedDateRange)
+  })()
 
   const { data: rawData, error, mutate } = useSWR(apiUrl, fetcher, {
     refreshInterval: 30000, // 30 seconds
@@ -204,6 +233,26 @@ export function DashboardContent() {
       }
     }
   }, [rawData, selectedEmployee, dashboardType, availableEmployees])
+
+  // Clear custom dates when switching away from "Custom Dates" option
+  useEffect(() => {
+    if (timePeriod !== 'Custom Dates') {
+      setCustomDateRange({ from: undefined, to: undefined })
+      setConfirmedDateRange({ from: undefined, to: undefined })
+    }
+  }, [timePeriod])
+
+  const handleDateRangeOk = () => {
+    if (customDateRange.from && customDateRange.to) {
+      setConfirmedDateRange(customDateRange)
+      setDatePickerOpen(false)
+    }
+  }
+
+  const handleDateRangeReset = () => {
+    setCustomDateRange({ from: undefined, to: undefined })
+    setConfirmedDateRange({ from: undefined, to: undefined })
+  }
 
   const getGaugeColor = (value: number, thresholds: number[]) => {
     if (value < thresholds[0]) return "#ef4444" // red
@@ -357,9 +406,9 @@ export function DashboardContent() {
                 Confirmers
               </Button>
             </div>
-            <div className="flex gap-2 justify-evenly md:justify-start">
+            <div className={`flex gap-2 ${timePeriod === "Custom Dates" ? "justify-center" : "justify-evenly"} md:justify-start`}>
               <Select value={timePeriod} onValueChange={setTimePeriod}>
-                <SelectTrigger className="h-9 w-[140px] dark:border-white/10 bg-white dark:bg-transparent">
+                <SelectTrigger className={`h-9 dark:border-white/10 bg-white dark:bg-transparent ${timePeriod === "Custom Dates" ? "w-[100px]" : "w-[140px]"} md:w-[140px]`}>
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
@@ -371,10 +420,53 @@ export function DashboardContent() {
                   <SelectItem value="This Month to Date">This Month to Date</SelectItem>
                   <SelectItem value="Last Month">Last Month</SelectItem>
                   <SelectItem value="Year to Date">Year to Date</SelectItem>
+                  <SelectItem value="Custom Dates">Custom Dates</SelectItem>
                 </SelectContent>
               </Select>
+              {timePeriod === "Custom Dates" && (
+                <Popover open={datePickerOpen} onOpenChange={setDatePickerOpen}>
+                  <PopoverTrigger asChild>
+                    <Button variant="outline" className={`h-9 dark:border-white/10 bg-white dark:bg-transparent font-normal ${timePeriod === "Custom Dates" ? "w-[125px]" : "w-[140px]"} md:w-[140px]`}>
+                      <CalendarIcon className="mr-2 h-4 w-4" />
+                      {confirmedDateRange.from && confirmedDateRange.to
+                        ? `${format(confirmedDateRange.from, "MMM d, yyyy")} - ${format(confirmedDateRange.to, "MMM d, yyyy")}`
+                        : "Pick dates"}
+                    </Button>
+                  </PopoverTrigger>
+                  <PopoverContent className="w-auto p-0" align="start">
+                    <Calendar
+                      mode="range"
+                      selected={customDateRange}
+                      onSelect={(range) => {
+                        if (range) {
+                          setCustomDateRange(range)
+                        }
+                      }}
+                      numberOfMonths={2}
+                      showOutsideDays={false}
+                      disabled={(date) => date > new Date()}
+                    />
+                    <div className="flex items-center justify-end gap-2 p-3 border-t">
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={handleDateRangeReset}
+                      >
+                        Reset
+                      </Button>
+                      <Button
+                        size="sm"
+                        onClick={handleDateRangeOk}
+                        disabled={!customDateRange.from || !customDateRange.to}
+                      >
+                        Ok
+                      </Button>
+                    </div>
+                  </PopoverContent>
+                </Popover>
+              )}
               <Select value={selectedEmployee} onValueChange={setSelectedEmployee}>
-                <SelectTrigger className="h-9 w-[140px] dark:border-white/10 bg-white dark:bg-transparent">
+                <SelectTrigger className={`h-9 dark:border-white/10 bg-white dark:bg-transparent ${timePeriod === "Custom Dates" ? "w-[100px]" : "w-[140px]"} md:w-[140px]`}>
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
@@ -622,8 +714,8 @@ export function DashboardContent() {
         </div>
       </main>
 
-      {/* Loading Overlay */}
-      {!data && <LoadingScreen />}
+      {/* Loading Overlay - Only show on initial load, not when waiting for custom date selection */}
+      {!data && !(timePeriod === 'Custom Dates' && (!confirmedDateRange.from || !confirmedDateRange.to)) && <LoadingScreen />}
     </div>
   )
 }
