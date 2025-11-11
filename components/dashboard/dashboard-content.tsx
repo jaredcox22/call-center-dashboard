@@ -127,10 +127,10 @@ const transformApiData = (apiData: any, selectedEmployee: string, dashboardType:
   const conversionUnqualified = totalPitched > 0 ? Math.round((totalUnqualified / totalPitched) * 100) : 0
   const grossIssue = totalCalls > 0 ? Math.round((totalPositive / totalCalls) * 100) : 0
   
-  // Calculate horsepower (composite score)
-  const horsepower = Math.round(
+  // Calculate horsepower (composite score) - capped at 100
+  const horsepower = Math.min(100, Math.round(
     (dialsPerHour * 2) + (connectionRate * 3) + (conversionRate * 5)
-  )
+  ))
   
   // Calculate skill score
   const skillScore = Math.round(
@@ -212,7 +212,7 @@ export function DashboardContent() {
   })
 
   const data = rawData ? transformApiData(rawData, selectedEmployee, dashboardType) : null
-
+  console.log(data)
   // Get unique employees from the appropriate calls array based on dashboard type
   const availableEmployees = rawData ? (() => {
     const callsKey = dashboardType === 'setters' ? 'settersCalls' : 'confirmersCalls'
@@ -570,7 +570,7 @@ export function DashboardContent() {
                     { label: "Average", min: 30, max: 39, color: "#f97316" },
                     { label: "Good", min: 40, max: 50, color: "#eab308" },
                     { label: "Excellent", min: 51, max: 65, color: "#22c55e" },
-                    { label: "Elite", min: 66, color: "#3b82f6" },
+                    { label: "Elite", min: 66, max: 100, color: "#3b82f6" },
                   ]}
                 />
                 <FeaturedMetricCard
