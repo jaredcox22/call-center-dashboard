@@ -599,14 +599,14 @@ export function DashboardContent() {
                   title="Horsepower"
                   value={settersMetrics.horsepower}
                   unit="HP"
-                  color={getGaugeColor(settersMetrics.horsepower, [29.5, 39.4, 50.3, 65.6])}
+                  color={getGaugeColor(settersMetrics.horsepower, [40.5, 51.5, 66.5, 89.5])}
                   subtitle="Combined Performance Score"
                   ranges={[
-                    { label: "Bad", min: 0, max: 29, color: "#ef4444" },
-                    { label: "Average", min: 30, max: 39, color: "#f97316" },
-                    { label: "Good", min: 40, max: 50, color: "#eab308" },
-                    { label: "Excellent", min: 51, max: 65, color: "#22c55e" },
-                    { label: "Elite", min: 66, max: 100, color: "#3b82f6" },
+                    { label: "Bad", min: 0, max: 40, color: "#ef4444" },
+                    { label: "Average", min: 41, max: 51, color: "#f97316" },
+                    { label: "Good", min: 52, max: 66, color: "#eab308" },
+                    { label: "Excellent", min: 67, max: 89, color: "#22c55e" },
+                    { label: "Elite", min: 90, max: 100, color: "#3b82f6" },
                   ]}
                 />
                 <FeaturedMetricCard
