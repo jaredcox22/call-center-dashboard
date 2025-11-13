@@ -64,16 +64,24 @@ const transformApiData = (apiData: any, selectedEmployee: string, dashboardType:
   const callsKey = dashboardType === 'setters' ? 'settersCalls' : 'confirmersCalls'
   const allCalls = apiData[callsKey] || []
   
+  // Get scorecards based on dashboard type
+  const scorecardsKey = dashboardType === 'setters' ? 'settersScorecards' : 'confirmersScorecards'
+  const allScorecards = apiData[scorecardsKey] || []
+  
   // Keep team-wide STL data (checkout to dial time is a TEAM metric)
   const teamStl = apiData.stl || []
   
   // Filter data by employee if not "all"
   let filteredCalls = allCalls
   let filteredHours = apiData.hours || []
+  let filteredScorecards = allScorecards
+
+  console.log(filteredScorecards)
   
   if (selectedEmployee !== 'all') {
     filteredCalls = allCalls.filter((call: any) => call.employee === selectedEmployee)
     filteredHours = apiData.hours?.filter((h: any) => h.employee === selectedEmployee) || []
+    filteredScorecards = allScorecards.filter((scorecard: any) => scorecard.employee === selectedEmployee)
   }
   
   // Calculate metrics from raw call data
@@ -127,20 +135,33 @@ const transformApiData = (apiData: any, selectedEmployee: string, dashboardType:
   const conversionUnqualified = totalPitched > 0 ? Math.round((totalUnqualified / totalPitched) * 100) : 0
   const grossIssue = totalCalls > 0 ? Math.round((totalPositive / totalCalls) * 100) : 0
   
+  // Calculate scorecard percentage: sum of actualTotals / sum of maxTotals * 100
+  let scoreCard = 0
+  if (filteredScorecards.length > 0) {
+    const totalActual = filteredScorecards.reduce((sum: number, sc: any) => sum + (sc.actualTotal || 0), 0)
+    const totalMax = filteredScorecards.reduce((sum: number, sc: any) => sum + (sc.maxTotal || 0), 0)
+    scoreCard = totalMax > 0 ? Math.round((totalActual / totalMax) * 100) : 0
+  }
+  
   // Calculate horsepower (composite score) - capped at 100
   const horsepower = Math.min(100, Math.round(
     (dialsPerHour * 2) + (connectionRate * 3) + (conversionRate * 5)
   ))
   
-  // Calculate skill score
-  const skillScore = Math.round(
-    (pitchRate * 0.4) + (conversionRate * 0.6)
-  )
+  // Calculate skill score using new formula:
+  // SkillScore = 100 × (0.40·SCnorm + 0.10·QCRnorm + 0.30·UCRnorm + 0.20·GIRnorm)
+  // SCnorm = SC ÷ 100 (scorecard)
+  // QCRnorm = QCR ÷ 100 (qualified conversion rate)
+  // UCRnorm = UCR ÷ 40 (unqualified conversion rate)
+  // GIRnorm = GIR ÷ 85 (gross issue rate)
+  const SCnorm = Math.min(1.0, scoreCard / 100)
+  const QCRnorm = Math.min(1.0, conversionQualified / 100)
+  const UCRnorm = Math.min(1.0, conversionUnqualified / 40)
+  const GIRnorm = Math.min(1.0, grossIssue / 85)
   
-  // Calculate score card (overall performance)
-  const scoreCard = Math.round(
-    (connectionRate * 0.3) + (pitchRate * 0.3) + (conversionRate * 0.4)
-  )
+  const skillScore = Math.min(100, Math.round(
+    100 * (0.40 * SCnorm + 0.10 * QCRnorm + 0.30 * UCRnorm + 0.20 * GIRnorm)
+  ))
   
   return {
     employees: Array.from(employees.entries()).map(([name, stats], index) => ({
@@ -169,7 +190,7 @@ const transformApiData = (apiData: any, selectedEmployee: string, dashboardType:
       grossIssueRate: Math.floor(Math.random() * 20) + 30,
       netIssueRate: Math.floor(Math.random() * 20) + 25,
       oneLegsRate: Math.floor(Math.random() * 15) + 15,
-      scorecard: Math.floor(Math.random() * 25) + 65,
+      scorecard: scoreCard, // Use the same scorecard calculation
     },
   }
 }
@@ -212,7 +233,7 @@ export function DashboardContent() {
   })
 
   const data = rawData ? transformApiData(rawData, selectedEmployee, dashboardType) : null
-  console.log(data)
+
   // Get unique employees from the appropriate calls array based on dashboard type
   const availableEmployees = rawData ? (() => {
     const callsKey = dashboardType === 'setters' ? 'settersCalls' : 'confirmersCalls'
@@ -591,14 +612,14 @@ export function DashboardContent() {
                   title="Skill Score"
                   value={settersMetrics.skillScore}
                   unit="pts"
-                  color={getGaugeColor(settersMetrics.skillScore, [29.5, 39.4, 50.3, 65.6])}
+                  color={getGaugeColor(settersMetrics.skillScore, [64, 74, 84, 94])}
                   subtitle="Overall Skill Rating"
                   ranges={[
-                    { label: "Bad", min: 0, max: 29, color: "#ef4444" },
-                    { label: "Average", min: 30, max: 39, color: "#f97316" },
-                    { label: "Good", min: 40, max: 50, color: "#eab308" },
-                    { label: "Excellent", min: 51, max: 65, color: "#22c55e" },
-                    { label: "Elite", min: 66, color: "#3b82f6" },
+                    { label: "Bad", min: 0, max: 64, color: "#ef4444" },
+                    { label: "Average", min: 65, max: 74, color: "#f97316" },
+                    { label: "Good", min: 75, max: 84, color: "#eab308" },
+                    { label: "Excellent", min: 85, max: 94, color: "#22c55e" },
+                    { label: "Elite", min: 95, max: 100, color: "#3b82f6" },
                   ]}
                 />
               </div>
