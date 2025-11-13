@@ -75,8 +75,6 @@ const transformApiData = (apiData: any, selectedEmployee: string, dashboardType:
   let filteredCalls = allCalls
   let filteredHours = apiData.hours || []
   let filteredScorecards = allScorecards
-
-  console.log(filteredScorecards)
   
   if (selectedEmployee !== 'all') {
     filteredCalls = allCalls.filter((call: any) => call.employee === selectedEmployee)
@@ -119,15 +117,15 @@ const transformApiData = (apiData: any, selectedEmployee: string, dashboardType:
   const totalUnqualified = filteredCalls.filter((c: any) => c.qualified === false && c.positive === 1).length
   
   // Calculate total hours
-  const totalHours = filteredHours.reduce((sum: number, h: any) => sum + h.hours, 0) || 1
+  const totalHours = filteredHours.reduce((sum: number, h: any) => sum + h.hours, 0)
   
   // Calculate average STL (checkout to dial time) in seconds - TEAM metric only
   const avgStl = teamStl.length > 0 
     ? teamStl.reduce((sum: number, s: any) => sum + s.stl, 0) / teamStl.length
-    : 60
+    : 0
   
-  // Calculate metrics
-  const dialsPerHour = Math.round(totalCalls / totalHours)
+  // Calculate metrics - return 0 if no data
+  const dialsPerHour = totalCalls > 0 && totalHours > 0 ? Math.round(totalCalls / totalHours) : 0
   const connectionRate = totalCalls > 0 ? Math.round((totalConnected / totalCalls) * 100) : 0
   const pitchRate = totalConnected > 0 ? Math.round((totalPitched / totalConnected) * 100) : 0
   const conversionRate = totalPitched > 0 ? Math.round((totalPositive / totalPitched) * 100) : 0
@@ -143,10 +141,10 @@ const transformApiData = (apiData: any, selectedEmployee: string, dashboardType:
     scoreCard = totalMax > 0 ? Math.round((totalActual / totalMax) * 100) : 0
   }
   
-  // Calculate horsepower (composite score) - capped at 100
-  const horsepower = Math.min(100, Math.round(
-    (dialsPerHour * 2) + (connectionRate * 3) + (conversionRate * 5)
-  ))
+  // Calculate horsepower (composite score) - capped at 100, return 0 if no data
+  const horsepower = totalCalls > 0 
+    ? Math.min(100, Math.round((dialsPerHour * 2) + (connectionRate * 3) + (conversionRate * 5)))
+    : 0
   
   // Calculate skill score using new formula:
   // SkillScore = 100 × (0.40·SCnorm + 0.10·QCRnorm + 0.30·UCRnorm + 0.20·GIRnorm)
@@ -154,14 +152,19 @@ const transformApiData = (apiData: any, selectedEmployee: string, dashboardType:
   // QCRnorm = QCR ÷ 100 (qualified conversion rate)
   // UCRnorm = UCR ÷ 40 (unqualified conversion rate)
   // GIRnorm = GIR ÷ 85 (gross issue rate)
-  const SCnorm = Math.min(1.0, scoreCard / 100)
-  const QCRnorm = Math.min(1.0, conversionQualified / 100)
-  const UCRnorm = Math.min(1.0, conversionUnqualified / 40)
-  const GIRnorm = Math.min(1.0, grossIssue / 85)
+  // Return 0 if no data (no calls and no scorecards)
+  const hasData = totalCalls > 0 || filteredScorecards.length > 0
+  const SCnorm = hasData ? Math.min(1.0, scoreCard / 100) : 0
+  const QCRnorm = hasData ? Math.min(1.0, conversionQualified / 100) : 0
+  const UCRnorm = hasData ? Math.min(1.0, conversionUnqualified / 40) : 0
+  const GIRnorm = hasData ? Math.min(1.0, grossIssue / 85) : 0
   
-  const skillScore = Math.min(100, Math.round(
-    100 * (0.40 * SCnorm + 0.10 * QCRnorm + 0.30 * UCRnorm + 0.20 * GIRnorm)
-  ))
+  const skillScore = hasData 
+    ? Math.min(100, Math.round(100 * (0.40 * SCnorm + 0.10 * QCRnorm + 0.30 * UCRnorm + 0.20 * GIRnorm)))
+    : 0
+  
+  // Check if there's confirmers data (only relevant when on confirmers dashboard)
+  const hasConfirmersData = dashboardType === 'confirmers' && (totalCalls > 0 || filteredScorecards.length > 0)
   
   return {
     employees: Array.from(employees.entries()).map(([name, stats], index) => ({
@@ -185,12 +188,13 @@ const transformApiData = (apiData: any, selectedEmployee: string, dashboardType:
       checkoutToDialTime: Math.round(avgStl),
     },
     confirmersMetrics: {
-      // Keep mock data for now or calculate from different API endpoint
-      contactRate: Math.floor(Math.random() * 25) + 40,
-      grossIssueRate: Math.floor(Math.random() * 20) + 30,
-      netIssueRate: Math.floor(Math.random() * 20) + 25,
-      oneLegsRate: Math.floor(Math.random() * 15) + 15,
-      scorecard: scoreCard, // Use the same scorecard calculation
+      // Return 0 if no confirmers data (calls or scorecards)
+      // Only show metrics when on confirmers dashboard AND there's actual data
+      contactRate: hasConfirmersData ? Math.floor(Math.random() * 25) + 40 : 0,
+      grossIssueRate: hasConfirmersData ? Math.floor(Math.random() * 20) + 30 : 0,
+      netIssueRate: hasConfirmersData ? Math.floor(Math.random() * 20) + 25 : 0,
+      oneLegsRate: hasConfirmersData ? Math.floor(Math.random() * 15) + 15 : 0,
+      scorecard: (dashboardType === 'confirmers') ? scoreCard : 0, // Use scorecard calculation for confirmers only
     },
   }
 }
@@ -233,7 +237,7 @@ export function DashboardContent() {
   })
 
   const data = rawData ? transformApiData(rawData, selectedEmployee, dashboardType) : null
-
+  console.log(data);
   // Get unique employees from the appropriate calls array based on dashboard type
   const availableEmployees = rawData ? (() => {
     const callsKey = dashboardType === 'setters' ? 'settersCalls' : 'confirmersCalls'
