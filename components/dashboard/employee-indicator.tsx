@@ -7,9 +7,10 @@ interface EmployeeIndicatorProps {
   dials: number
   connections: number
   conversions: number
+  hours?: number
 }
 
-export function EmployeeIndicator({ name, dials, connections, conversions }: EmployeeIndicatorProps) {
+export function EmployeeIndicator({ name, dials, connections, conversions, hours }: EmployeeIndicatorProps) {
 
   return (
     <Card className="p-4">
@@ -17,6 +18,10 @@ export function EmployeeIndicator({ name, dials, connections, conversions }: Emp
         <h4 className="font-semibold">{name}</h4>
       </div>
       <div className="space-y-2">
+        <div className="flex justify-between text-sm">
+          <span className="text-muted-foreground">Hours:</span>
+          <span className="font-medium">{hours !== undefined ? hours.toFixed(1) : '0.0'}</span>
+        </div>
         <div className="flex justify-between text-sm">
           <span className="text-muted-foreground">Dials:</span>
           <span className="font-medium">{dials}</span>

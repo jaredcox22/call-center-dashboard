@@ -94,17 +94,27 @@ const transformApiData = (apiData: any, selectedEmployee: string, dashboardType:
     callsByEmployee.get(call.employee).push(call)
   })
   
+  // Create a map of hours by employee name
+  const hoursByEmployee = new Map<string, number>()
+  filteredHours.forEach((h: any) => {
+    if (h.employee) {
+      hoursByEmployee.set(h.employee, h.hours || 0)
+    }
+  })
+
   // Calculate per-employee stats
   callsByEmployee.forEach((calls, employeeName) => {
     const connected = calls.filter((c: any) => c.connected === 1).length
     const pitched = calls.filter((c: any) => c.pitched === 1).length
     const positive = calls.filter((c: any) => c.positive === 1).length
+    const hours = hoursByEmployee.get(employeeName) || 0
     
     employees.set(employeeName, {
       dials: calls.length,
       connections: connected,
       conversions: positive,
       pitches: pitched,
+      hours: hours,
     })
   })
   
@@ -173,6 +183,7 @@ const transformApiData = (apiData: any, selectedEmployee: string, dashboardType:
       dials: (stats as any).dials,
       connections: (stats as any).connections,
       conversions: (stats as any).conversions,
+      hours: (stats as any).hours,
     })),
     settersMetrics: {
       dialsPerHour,
@@ -896,6 +907,7 @@ export function DashboardContent() {
                   dials={employee.dials}
                   connections={employee.connections}
                   conversions={employee.conversions}
+                  hours={employee.hours}
                 />
               ))}
             </div>
