@@ -713,37 +713,37 @@ export function DashboardContent() {
                 title="ScoreCard"
                 value={settersMetrics.scoreCard}
                 max={100}
-                color={getGaugeColor(settersMetrics.scoreCard, [22, 25, 29, 34])}
+                color={getGaugeColor(settersMetrics.scoreCard, [69, 79, 89, 99])}
                 unit="%"
                 size="small"
                 ranges={[
-                  { label: "Bad", min: 0, max: 21, color: "#ef4444" },
-                  { label: "Average", min: 22, max: 24, color: "#f97316" },
-                  { label: "Good", min: 25, max: 28, color: "#eab308" },
-                  { label: "Excellent", min: 29, max: 33, color: "#22c55e" },
-                  { label: "Elite", min: 34, color: "#3b82f6" },
+                  { label: "Bad", min: 0, max: 69, color: "#ef4444" },
+                  { label: "Average", min: 70, max: 79, color: "#f97316" },
+                  { label: "Good", min: 80, max: 89, color: "#eab308" },
+                  { label: "Excellent", min: 90, max: 99, color: "#22c55e" },
+                  { label: "Elite", min: 100, max: 100, color: "#3b82f6" },
                 ]}
               />
               <CircularGauge
                 title="Conversion % (Qualified)"
                 value={settersMetrics.conversionQualified}
                 max={100}
-                color={getGaugeColor(settersMetrics.conversionQualified, [22, 27, 33, 40])}
+                color={getGaugeColor(settersMetrics.conversionQualified, [64, 74, 84, 94])}
                 unit="%"
                 size="small"
                 ranges={[
-                  { label: "Bad", min: 0, max: 21, color: "#ef4444" },
-                  { label: "Average", min: 22, max: 26, color: "#f97316" },
-                  { label: "Good", min: 27, max: 32, color: "#eab308" },
-                  { label: "Excellent", min: 33, max: 39, color: "#22c55e" },
-                  { label: "Elite", min: 40, color: "#3b82f6" },
+                  { label: "Bad", min: 0, max: 64, color: "#ef4444" },
+                  { label: "Average", min: 65, max: 74, color: "#f97316" },
+                  { label: "Good", min: 75, max: 84, color: "#eab308" },
+                  { label: "Excellent", min: 85, max: 94, color: "#22c55e" },
+                  { label: "Elite", min: 95, max: 100, color: "#3b82f6" },
                 ]}
               />
               <CircularGauge
                 title="Conversion % (Un-Qualified)"
                 value={settersMetrics.conversionUnqualified}
                 max={100}
-                color={getGaugeColor(settersMetrics.conversionUnqualified, [22, 27, 33, 40])}
+                color={getGaugeColor(settersMetrics.conversionUnqualified, [21, 26, 32, 39])}
                 unit="%"
                 size="small"
                 ranges={[
@@ -751,7 +751,7 @@ export function DashboardContent() {
                   { label: "Average", min: 22, max: 26, color: "#f97316" },
                   { label: "Good", min: 27, max: 32, color: "#eab308" },
                   { label: "Excellent", min: 33, max: 39, color: "#22c55e" },
-                  { label: "Elite", min: 40, color: "#3b82f6" },
+                  { label: "Elite", min: 40, max: 100, color: "#3b82f6" },
                 ]}
               />
               <CircularGauge
@@ -799,36 +799,71 @@ export function DashboardContent() {
                 title="Contact Rate"
                 value={confirmersMetrics.contactRate}
                 max={100}
-                color={getGaugeColor(confirmersMetrics.contactRate, [30, 45, 60, 75])}
+                color={getGaugeColor(confirmersMetrics.contactRate, [74.9, 79.9, 84.9, 89.9])}
                 unit="%"
+                ranges={[
+                  { label: "Bad", min: 0, max: 74.9, color: "#ef4444" },
+                  { label: "Average", min: 75, max: 79.9, color: "#f97316" },
+                  { label: "Good", min: 80, max: 84.9, color: "#eab308" },
+                  { label: "Excellent", min: 85, max: 89.9, color: "#22c55e" },
+                  { label: "Elite", min: 90, max: 100, color: "#3b82f6" },
+                ]}
               />
               <CircularGauge
                 title="Gross Issue Rate"
                 value={confirmersMetrics.grossIssueRate}
                 max={100}
-                color={getGaugeColor(confirmersMetrics.grossIssueRate, [20, 35, 50, 65])}
+                color={getGaugeColor(confirmersMetrics.grossIssueRate, [69.9, 74.9, 80.9, 84.9])}
                 unit="%"
+                ranges={[
+                  { label: "Bad", min: 0, max: 69.9, color: "#ef4444" },
+                  { label: "Average", min: 70, max: 74.9, color: "#f97316" },
+                  { label: "Good", min: 75, max: 80.9, color: "#eab308" },
+                  { label: "Excellent", min: 81, max: 84.9, color: "#22c55e" },
+                  { label: "Elite", min: 85, max: 100, color: "#3b82f6" },
+                ]}
               />
               <CircularGauge
                 title="Net Issue Rate"
                 value={confirmersMetrics.netIssueRate}
                 max={100}
-                color={getGaugeColor(confirmersMetrics.netIssueRate, [15, 30, 45, 60])}
+                color={getGaugeColor(confirmersMetrics.netIssueRate, [81.9, 85.9, 87.9, 91.9])}
                 unit="%"
+                ranges={[
+                  { label: "Bad", min: 0, max: 81.9, color: "#ef4444" },
+                  { label: "Average", min: 82, max: 85.9, color: "#f97316" },
+                  { label: "Good", min: 86, max: 87.9, color: "#eab308" },
+                  { label: "Excellent", min: 88, max: 91.9, color: "#22c55e" },
+                  { label: "Elite", min: 92, max: 100, color: "#3b82f6" },
+                ]}
               />
               <CircularGauge
                 title="1-Leg Rate"
                 value={confirmersMetrics.oneLegsRate}
                 max={100}
-                color={getGaugeColor(confirmersMetrics.oneLegsRate, [10, 20, 30, 40])}
+                color={getGaugeColor(confirmersMetrics.oneLegsRate, [69.9, 74.9, 79.9, 84.9])}
                 unit="%"
+                ranges={[
+                  { label: "Bad", min: 0, max: 69.9, color: "#ef4444" },
+                  { label: "Average", min: 70, max: 74.9, color: "#f97316" },
+                  { label: "Good", min: 75, max: 79.9, color: "#eab308" },
+                  { label: "Excellent", min: 80, max: 84.9, color: "#22c55e" },
+                  { label: "Elite", min: 85, max: 100, color: "#3b82f6" },
+                ]}
               />
               <CircularGauge
                 title="Scorecard"
                 value={confirmersMetrics.scorecard}
                 max={100}
-                color={getGaugeColor(confirmersMetrics.scorecard, [55, 70, 80, 90])}
-                unit="pts"
+                color={getGaugeColor(confirmersMetrics.scorecard, [59.9, 69.9, 79.9, 89.9])}
+                unit="%"
+                ranges={[
+                  { label: "Bad", min: 0, max: 59.9, color: "#ef4444" },
+                  { label: "Average", min: 60, max: 69.9, color: "#f97316" },
+                  { label: "Good", min: 70, max: 79.9, color: "#eab308" },
+                  { label: "Excellent", min: 80, max: 89.9, color: "#22c55e" },
+                  { label: "Elite", min: 90, max: 100, color: "#3b82f6" },
+                ]}
               />
             </div>
             )}
