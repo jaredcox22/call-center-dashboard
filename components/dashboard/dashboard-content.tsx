@@ -461,6 +461,7 @@ export function DashboardContent() {
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="Today">Today</SelectItem>
+                  <SelectItem value="Yesterday">Yesterday</SelectItem>
                   <SelectItem value="Rolling 7 Days">Rolling 7 Days</SelectItem>
                   <SelectItem value="This Week (Sun-Sat)">This Week</SelectItem>
                   <SelectItem value="Last Week (Sun-Sat)">Last Week</SelectItem>

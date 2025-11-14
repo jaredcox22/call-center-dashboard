@@ -50,6 +50,11 @@ if ($_SERVER['REQUEST_METHOD'] == 'OPTIONS') {
             $end = date('Y-m-d', strtotime('tomorrow'));
             break;
 
+        case 'Yesterday':
+            $start = date('Y-m-d', strtotime('yesterday'));
+            $end = date('Y-m-d');
+            break;
+
         case 'Rolling 7':
         case 'Rolling 7 Days':
             $start = date('Y-m-d', strtotime('-6 days')); // includes today
