@@ -42,7 +42,12 @@ const fetcher = async (url: string) => {
   return response.json()
 }
 
-const buildApiUrl = (dateRange: string, customRange?: { from: Date | undefined; to?: Date | undefined }) => {
+const buildApiUrl = (
+  dateRange: string, 
+  customRange?: { from: Date | undefined; to?: Date | undefined },
+  secondaryDateRange?: string,
+  secondaryCustomRange?: { from: Date | undefined; to?: Date | undefined }
+) => {
   const baseUrl = 'https://api.integrityprodserver.com/dashboards/ccHorsepower.php'
   const params = new URLSearchParams({ dateRange })
   
@@ -54,6 +59,17 @@ const buildApiUrl = (dateRange: string, customRange?: { from: Date | undefined; 
     const nextDay = new Date(customRange.to)
     nextDay.setDate(nextDay.getDate() + 1)
     params.append('endDate', format(nextDay, 'yyyy-MM-dd'))
+  }
+  
+  // Always add secondary date range (defaults to "Rolling 30 Days" if not provided)
+  const effectiveSecondaryDateRange = secondaryDateRange || 'Rolling 30 Days'
+  params.append('secondaryDateRange', effectiveSecondaryDateRange)
+  
+  if (effectiveSecondaryDateRange === 'Custom Dates' && secondaryCustomRange?.from && secondaryCustomRange?.to) {
+    params.append('secondaryStartDate', format(secondaryCustomRange.from, 'yyyy-MM-dd'))
+    const secondaryNextDay = new Date(secondaryCustomRange.to)
+    secondaryNextDay.setDate(secondaryNextDay.getDate() + 1)
+    params.append('secondaryEndDate', format(secondaryNextDay, 'yyyy-MM-dd'))
   }
   
   return `${baseUrl}?${params.toString()}`
@@ -228,6 +244,19 @@ export function DashboardContent() {
   })
   const [datePickerOpen, setDatePickerOpen] = useState(false)
   const [mobilePickerOpen, setMobilePickerOpen] = useState(false)
+  
+  // Secondary date range state for performance metrics
+  const [secondaryTimePeriod, setSecondaryTimePeriod] = useState("Rolling 30 Days")
+  const [secondaryCustomDateRange, setSecondaryCustomDateRange] = useState<{ from: Date | undefined; to?: Date | undefined }>({ 
+    from: undefined, 
+    to: undefined 
+  })
+  const [secondaryConfirmedDateRange, setSecondaryConfirmedDateRange] = useState<{ from: Date | undefined; to?: Date | undefined }>({ 
+    from: undefined, 
+    to: undefined 
+  })
+  const [secondaryDatePickerOpen, setSecondaryDatePickerOpen] = useState(false)
+  const [secondaryMobilePickerOpen, setSecondaryMobilePickerOpen] = useState(false)
 
   // Track user activity for session management
   useActivityTracker()
@@ -237,7 +266,10 @@ export function DashboardContent() {
     if (timePeriod === 'Custom Dates' && (!confirmedDateRange.from || !confirmedDateRange.to)) {
       return null // Don't fetch until dates are confirmed with Ok button
     }
-    return buildApiUrl(timePeriod, confirmedDateRange)
+    if (secondaryTimePeriod === 'Custom Dates' && (!secondaryConfirmedDateRange.from || !secondaryConfirmedDateRange.to)) {
+      return null // Don't fetch until secondary dates are confirmed with Ok button
+    }
+    return buildApiUrl(timePeriod, confirmedDateRange, secondaryTimePeriod || 'Rolling 30 Days', secondaryConfirmedDateRange)
   })()
 
   const { data: rawData, error, mutate } = useSWR(apiUrl, fetcher, {
@@ -248,6 +280,18 @@ export function DashboardContent() {
   })
 
   const data = rawData ? transformApiData(rawData, selectedEmployee, dashboardType) : null
+  const secondaryData = rawData ? transformApiData(
+    {
+      settersCalls: rawData.secondarySettersCalls || [],
+      confirmersCalls: rawData.secondaryConfirmersCalls || [],
+      hours: rawData.secondaryHours || [],
+      settersScorecards: rawData.secondarySettersScorecards || [],
+      confirmersScorecards: rawData.secondaryConfirmersScorecards || [],
+      stl: [], // STL is team-wide, not needed for secondary metrics
+    },
+    selectedEmployee,
+    dashboardType
+  ) : null
   console.log(data);
   // Get unique employees from the appropriate calls array based on dashboard type
   const availableEmployees = rawData ? (() => {
@@ -280,6 +324,14 @@ export function DashboardContent() {
     }
   }, [timePeriod])
 
+  // Clear secondary custom dates when switching away from "Custom Dates" option
+  useEffect(() => {
+    if (secondaryTimePeriod !== 'Custom Dates') {
+      setSecondaryCustomDateRange({ from: undefined, to: undefined })
+      setSecondaryConfirmedDateRange({ from: undefined, to: undefined })
+    }
+  }, [secondaryTimePeriod])
+
   const handleDateRangeOk = () => {
     if (customDateRange.from && customDateRange.to) {
       setConfirmedDateRange(customDateRange)
@@ -291,6 +343,19 @@ export function DashboardContent() {
   const handleDateRangeReset = () => {
     setCustomDateRange({ from: undefined, to: undefined })
     setConfirmedDateRange({ from: undefined, to: undefined })
+  }
+
+  const handleSecondaryDateRangeOk = () => {
+    if (secondaryCustomDateRange.from && secondaryCustomDateRange.to) {
+      setSecondaryConfirmedDateRange(secondaryCustomDateRange)
+      setSecondaryDatePickerOpen(false)
+      setSecondaryMobilePickerOpen(false)
+    }
+  }
+
+  const handleSecondaryDateRangeReset = () => {
+    setSecondaryCustomDateRange({ from: undefined, to: undefined })
+    setSecondaryConfirmedDateRange({ from: undefined, to: undefined })
   }
 
   const getGaugeColor = (value: number, thresholds: number[]) => {
@@ -577,11 +642,10 @@ export function DashboardContent() {
           <>
             {/* Featured Metrics */}
             {!data ? (
-              <div className="mb-4 grid gap-6 grid-cols-1 sm:grid-cols-3">
+              <div className="mb-4 grid gap-6 grid-cols-1 sm:grid-cols-2">
                 {[
                   { title: "Horsepower", subtitle: "Combined Performance Score" },
-                  { title: "Checkout to Dial Time", subtitle: "Team Metric • Speed" },
-                  { title: "Skill Score", subtitle: "Overall Skill Rating" }
+                  { title: "Checkout to Dial Time", subtitle: "Team Metric • Speed" }
                 ].map((metric, i) => (
                   <Card key={i} className="p-8">
                     <div className="flex flex-col items-center justify-center text-center min-h-[200px]">
@@ -595,7 +659,7 @@ export function DashboardContent() {
                 ))}
               </div>
             ) : (
-              <div className="mb-4 grid gap-6 grid-cols-1 sm:grid-cols-3">
+              <div className="mb-4 grid gap-6 grid-cols-1 sm:grid-cols-2">
                 <FeaturedMetricCard
                   title="Horsepower"
                   value={settersMetrics.horsepower}
@@ -627,36 +691,17 @@ export function DashboardContent() {
                     { label: "Bad", min: 90, color: "#ef4444" },
                   ]}
                 />
-                <FeaturedMetricCard
-                  title="Skill Score"
-                  value={settersMetrics.skillScore}
-                  unit="pts"
-                  color={getGaugeColor(settersMetrics.skillScore, [64, 74, 84, 94])}
-                  subtitle="Overall Skill Rating"
-                  target={85}
-                  ranges={[
-                    { label: "Bad", min: 0, max: 64, color: "#ef4444" },
-                    { label: "Average", min: 65, max: 74, color: "#f97316" },
-                    { label: "Good", min: 75, max: 84, color: "#eab308" },
-                    { label: "Excellent", min: 85, max: 94, color: "#22c55e" },
-                    { label: "Elite", min: 95, max: 100, color: "#3b82f6" },
-                  ]}
-                />
               </div>
             )}
 
             {/* Setters Metrics Gauges */}
             {!data ? (
-              <div className="mb-4 grid grid-cols-2 gap-3 md:grid-cols-4 2xl:grid-cols-8">
+              <div className="mb-4 grid grid-cols-2 gap-3 md:grid-cols-4">
                 {[
                   "Dials Per Hour",
                   "Connection %",
                   "Pitch %",
-                  "Conversion %",
-                  "ScoreCard",
-                  "Conversion % (Qualified)",
-                  "Conversion % (Un-Qualified)",
-                  "Gross Issue"
+                  "Conversion %"
                 ].map((title, i) => (
                   <Card key={i} className="p-4">
                     <div className="flex flex-col items-center justify-center text-center min-h-[120px]">
@@ -668,7 +713,7 @@ export function DashboardContent() {
                 ))}
               </div>
             ) : (
-              <div className="mb-4 grid grid-cols-2 gap-3 md:grid-cols-4 2xl:grid-cols-8">
+              <div className="mb-4 grid grid-cols-2 gap-3 md:grid-cols-4">
               <CircularGauge
                 title="Dials Per Hour"
                 value={settersMetrics.dialsPerHour}
@@ -733,72 +778,245 @@ export function DashboardContent() {
                   { label: "Elite", min: 40, color: "#3b82f6" },
                 ]}
               />
-              <CircularGauge
-                title="ScoreCard"
-                value={settersMetrics.scoreCard}
-                max={100}
-                target={90}
-                color={getGaugeColor(settersMetrics.scoreCard, [69, 79, 89, 99])}
-                unit="%"
-                size="small"
-                ranges={[
-                  { label: "Bad", min: 0, max: 69, color: "#ef4444" },
-                  { label: "Average", min: 70, max: 79, color: "#f97316" },
-                  { label: "Good", min: 80, max: 89, color: "#eab308" },
-                  { label: "Excellent", min: 90, max: 99, color: "#22c55e" },
-                  { label: "Elite", min: 100, max: 100, color: "#3b82f6" },
-                ]}
-              />
-              <CircularGauge
-                title="Conversion % (Qualified)"
-                value={settersMetrics.conversionQualified}
-                max={100}
-                target={85}
-                color={getGaugeColor(settersMetrics.conversionQualified, [64, 74, 84, 94])}
-                unit="%"
-                size="small"
-                ranges={[
-                  { label: "Bad", min: 0, max: 64, color: "#ef4444" },
-                  { label: "Average", min: 65, max: 74, color: "#f97316" },
-                  { label: "Good", min: 75, max: 84, color: "#eab308" },
-                  { label: "Excellent", min: 85, max: 94, color: "#22c55e" },
-                  { label: "Elite", min: 95, max: 100, color: "#3b82f6" },
-                ]}
-              />
-              <CircularGauge
-                title="Conversion % (Un-Qualified)"
-                value={settersMetrics.conversionUnqualified}
-                max={100}
-                target={33}
-                color={getGaugeColor(settersMetrics.conversionUnqualified, [21, 26, 32, 39])}
-                unit="%"
-                size="small"
-                ranges={[
-                  { label: "Bad", min: 0, max: 21, color: "#ef4444" },
-                  { label: "Average", min: 22, max: 26, color: "#f97316" },
-                  { label: "Good", min: 27, max: 32, color: "#eab308" },
-                  { label: "Excellent", min: 33, max: 39, color: "#22c55e" },
-                  { label: "Elite", min: 40, max: 100, color: "#3b82f6" },
-                ]}
-              />
-              <CircularGauge
-                title="Gross Issue"
-                value={settersMetrics.grossIssue}
-                max={100}
-                target={81}
-                color={getGaugeColor(settersMetrics.grossIssue, [70, 75, 81, 85])}
-                unit="%"
-                size="small"
-                ranges={[
-                  { label: "Bad", min: 0, max: 69, color: "#ef4444" },
-                  { label: "Average", min: 70, max: 74, color: "#f97316" },
-                  { label: "Good", min: 75, max: 80, color: "#eab308" },
-                  { label: "Excellent", min: 81, max: 84, color: "#22c55e" },
-                  { label: "Elite", min: 85, color: "#3b82f6" },
-                ]}
-              />
             </div>
             )}
+
+            {/* Performance Metrics Section */}
+            <div className="mt-8 mb-6">
+                {/* Header with Title and Date Range Filter */}
+                <Card className="mb-6 p-3 bg-transparent shadow-none border-none dark:shadow-none dark:border-none">
+                  <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+                    <div>
+                      <h2 className="text-2xl font-bold mb-2">Performance Metrics</h2>
+                      <p className="text-sm text-muted-foreground">
+                        These metrics are best viewed over longer time periods. Default: Rolling 30 Days
+                      </p>
+                    </div>
+                    <div className="flex gap-2 justify-center md:justify-end">
+                      <Select value={secondaryTimePeriod} onValueChange={setSecondaryTimePeriod}>
+                        <SelectTrigger className="h-9 dark:border-white/10 bg-white dark:bg-transparent w-[140px]">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="Today">Today</SelectItem>
+                          <SelectItem value="Yesterday">Yesterday</SelectItem>
+                          <SelectItem value="Rolling 7 Days">Rolling 7 Days</SelectItem>
+                          <SelectItem value="This Week (Sun-Sat)">This Week</SelectItem>
+                          <SelectItem value="Last Week (Sun-Sat)">Last Week</SelectItem>
+                          <SelectItem value="Rolling 30 Days">Rolling 30 Days</SelectItem>
+                          <SelectItem value="This Month to Date">This Month to Date</SelectItem>
+                          <SelectItem value="Last Month">Last Month</SelectItem>
+                          <SelectItem value="Year to Date">Year to Date</SelectItem>
+                          <SelectItem value="Custom Dates">Custom Dates</SelectItem>
+                        </SelectContent>
+                      </Select>
+                      {secondaryTimePeriod === "Custom Dates" && (
+                        <Popover open={secondaryDatePickerOpen} onOpenChange={setSecondaryDatePickerOpen}>
+                          <PopoverTrigger asChild>
+                            <Button variant="outline" className="hidden md:flex h-9 dark:border-white/10 bg-white dark:bg-transparent font-normal">
+                              <CalendarIcon className="mr-2 h-4 w-4" />
+                              {secondaryConfirmedDateRange.from && secondaryConfirmedDateRange.to
+                                ? `${format(secondaryConfirmedDateRange.from, "MMM d, yyyy")} - ${format(secondaryConfirmedDateRange.to, "MMM d, yyyy")}`
+                                : "Pick dates"}
+                            </Button>
+                          </PopoverTrigger>
+                          <PopoverContent className="w-auto p-0" align="start">
+                            <Calendar
+                              mode="range"
+                              selected={secondaryCustomDateRange}
+                              onSelect={(range) => {
+                                if (range) {
+                                  setSecondaryCustomDateRange(range)
+                                }
+                              }}
+                              numberOfMonths={2}
+                              showOutsideDays={false}
+                              disabled={(date) => date > new Date()}
+                            />
+                            <div className="flex items-center justify-end gap-2 p-3 border-t">
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                onClick={handleSecondaryDateRangeReset}
+                              >
+                                Reset
+                              </Button>
+                              <Button
+                                size="sm"
+                                onClick={handleSecondaryDateRangeOk}
+                                disabled={!secondaryCustomDateRange.from || !secondaryCustomDateRange.to}
+                              >
+                                Ok
+                              </Button>
+                            </div>
+                          </PopoverContent>
+                        </Popover>
+                      )}
+                      {secondaryTimePeriod === "Custom Dates" && (
+                        <Popover open={secondaryMobilePickerOpen} onOpenChange={setSecondaryMobilePickerOpen}>
+                          <PopoverTrigger asChild>
+                            <Button variant="outline" className="flex md:hidden h-9 dark:border-white/10 bg-white dark:bg-transparent font-normal">
+                              <CalendarIcon className="mr-2 h-4 w-4" />
+                              {secondaryConfirmedDateRange.from && secondaryConfirmedDateRange.to
+                                ? `${format(secondaryConfirmedDateRange.from, "MMM d, yyyy")} - ${format(secondaryConfirmedDateRange.to, "MMM d, yyyy")}`
+                                : "Pick dates"}
+                            </Button>
+                          </PopoverTrigger>
+                          <PopoverContent className="w-auto p-0" align="start">
+                            <Calendar
+                              mode="range"
+                              selected={secondaryCustomDateRange}
+                              onSelect={(range) => {
+                                if (range) {
+                                  setSecondaryCustomDateRange(range)
+                                }
+                              }}
+                              numberOfMonths={1}
+                              showOutsideDays={false}
+                              disabled={(date) => date > new Date()}
+                            />
+                            <div className="flex items-center justify-end gap-2 p-3 border-t">
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                onClick={handleSecondaryDateRangeReset}
+                              >
+                                Reset
+                              </Button>
+                              <Button
+                                size="sm"
+                                onClick={handleSecondaryDateRangeOk}
+                                disabled={!secondaryCustomDateRange.from || !secondaryCustomDateRange.to}
+                              >
+                                Ok
+                              </Button>
+                            </div>
+                          </PopoverContent>
+                        </Popover>
+                      )}
+                    </div>
+                  </div>
+                </Card>
+
+                {/* Performance Metrics Display */}
+                {!secondaryData ? (
+                  <>
+                    {/* Skill Score - Full Width */}
+                    <Card className="mb-4 p-4">
+                      <div className="flex flex-col items-center justify-center text-center min-h-[120px]">
+                        <h4 className="text-sm font-medium mb-2">Skill Score</h4>
+                        <AlertCircle className="h-5 w-5 mb-1 text-muted-foreground" />
+                        <p className="text-xs text-muted-foreground">No data</p>
+                      </div>
+                    </Card>
+                    {/* Other Metrics Grid */}
+                    <div className="grid gap-4 grid-cols-1 sm:grid-cols-2 lg:grid-cols-4">
+                      {[
+                        "ScoreCard",
+                        "Conversion % (Qualified)",
+                        "Conversion % (Un-Qualified)",
+                        "Gross Issue"
+                      ].map((title, i) => (
+                        <Card key={i} className="p-4">
+                          <div className="flex flex-col items-center justify-center text-center min-h-[120px]">
+                            <h4 className="text-sm font-medium mb-2">{title}</h4>
+                            <AlertCircle className="h-5 w-5 mb-1 text-muted-foreground" />
+                            <p className="text-xs text-muted-foreground">No data</p>
+                          </div>
+                        </Card>
+                      ))}
+                    </div>
+                  </>
+                ) : (
+                  <>
+                    {/* Skill Score - Full Width */}
+                    <div className="mb-4">
+                      <FeaturedMetricCard
+                        title="Skill Score"
+                        value={secondaryData.settersMetrics.skillScore}
+                        unit="pts"
+                        color={getGaugeColor(secondaryData.settersMetrics.skillScore, [64, 74, 84, 94])}
+                        subtitle="Overall Skill Rating"
+                        target={85}
+                        ranges={[
+                          { label: "Bad", min: 0, max: 64, color: "#ef4444" },
+                          { label: "Average", min: 65, max: 74, color: "#f97316" },
+                          { label: "Good", min: 75, max: 84, color: "#eab308" },
+                          { label: "Excellent", min: 85, max: 94, color: "#22c55e" },
+                          { label: "Elite", min: 95, max: 100, color: "#3b82f6" },
+                        ]}
+                      />
+                    </div>
+                    {/* Other Metrics Grid */}
+                    <div className="grid gap-4 grid-cols-1 sm:grid-cols-2 lg:grid-cols-4">
+                      <CircularGauge
+                        title="ScoreCard"
+                        value={secondaryData.settersMetrics.scoreCard}
+                        max={100}
+                        target={90}
+                        color={getGaugeColor(secondaryData.settersMetrics.scoreCard, [69, 79, 89, 99])}
+                        unit="%"
+                        size="small"
+                        ranges={[
+                          { label: "Bad", min: 0, max: 69, color: "#ef4444" },
+                          { label: "Average", min: 70, max: 79, color: "#f97316" },
+                          { label: "Good", min: 80, max: 89, color: "#eab308" },
+                          { label: "Excellent", min: 90, max: 99, color: "#22c55e" },
+                          { label: "Elite", min: 100, max: 100, color: "#3b82f6" },
+                        ]}
+                      />
+                      <CircularGauge
+                        title="Conversion % (Qualified)"
+                        value={secondaryData.settersMetrics.conversionQualified}
+                        max={100}
+                        target={85}
+                        color={getGaugeColor(secondaryData.settersMetrics.conversionQualified, [64, 74, 84, 94])}
+                        unit="%"
+                        size="small"
+                        ranges={[
+                          { label: "Bad", min: 0, max: 64, color: "#ef4444" },
+                          { label: "Average", min: 65, max: 74, color: "#f97316" },
+                          { label: "Good", min: 75, max: 84, color: "#eab308" },
+                          { label: "Excellent", min: 85, max: 94, color: "#22c55e" },
+                          { label: "Elite", min: 95, max: 100, color: "#3b82f6" },
+                        ]}
+                      />
+                      <CircularGauge
+                        title="Conversion % (Un-Qualified)"
+                        value={secondaryData.settersMetrics.conversionUnqualified}
+                        max={100}
+                        target={33}
+                        color={getGaugeColor(secondaryData.settersMetrics.conversionUnqualified, [21, 26, 32, 39])}
+                        unit="%"
+                        size="small"
+                        ranges={[
+                          { label: "Bad", min: 0, max: 21, color: "#ef4444" },
+                          { label: "Average", min: 22, max: 26, color: "#f97316" },
+                          { label: "Good", min: 27, max: 32, color: "#eab308" },
+                          { label: "Excellent", min: 33, max: 39, color: "#22c55e" },
+                          { label: "Elite", min: 40, max: 100, color: "#3b82f6" },
+                        ]}
+                      />
+                      <CircularGauge
+                        title="Gross Issue"
+                        value={secondaryData.settersMetrics.grossIssue}
+                        max={100}
+                        target={81}
+                        color={getGaugeColor(secondaryData.settersMetrics.grossIssue, [70, 75, 81, 85])}
+                        unit="%"
+                        size="small"
+                        ranges={[
+                          { label: "Bad", min: 0, max: 69, color: "#ef4444" },
+                          { label: "Average", min: 70, max: 74, color: "#f97316" },
+                          { label: "Good", min: 75, max: 80, color: "#eab308" },
+                          { label: "Excellent", min: 81, max: 84, color: "#22c55e" },
+                          { label: "Elite", min: 85, color: "#3b82f6" },
+                        ]}
+                      />
+                    </div>
+                  </>
+                )}
+            </div>
           </>
         ) : (
           <>
@@ -934,7 +1152,7 @@ export function DashboardContent() {
       </main>
 
       {/* Loading Overlay - Only show on initial load, not when waiting for custom date selection */}
-      {!data && !(timePeriod === 'Custom Dates' && (!confirmedDateRange.from || !confirmedDateRange.to)) && <LoadingScreen />}
+      {!data && !(timePeriod === 'Custom Dates' && (!confirmedDateRange.from || !confirmedDateRange.to)) && !(secondaryTimePeriod === 'Custom Dates' && (!secondaryConfirmedDateRange.from || !secondaryConfirmedDateRange.to)) && <LoadingScreen />}
     </div>
   )
 }

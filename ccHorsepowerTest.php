@@ -114,6 +114,76 @@ if ($_SERVER['REQUEST_METHOD'] == 'OPTIONS') {
         $end = date('Y-m-d', strtotime("tomorrow"));
     }
 
+    // Handle secondary date range for performance metrics
+    $secondaryStart = date('Y-m-d', strtotime('-29 days')); // Default to Rolling 30 Days
+    $secondaryEnd = date('Y-m-d', strtotime('tomorrow'));
+    
+    if(array_key_exists('secondaryDateRange', $_GET)){
+        switch ($_GET['secondaryDateRange']) {
+        case 'Today':
+            $secondaryStart = date('Y-m-d');
+            $secondaryEnd = date('Y-m-d', strtotime('tomorrow'));
+            break;
+
+        case 'Yesterday':
+            $secondaryStart = date('Y-m-d', strtotime('yesterday'));
+            $secondaryEnd = date('Y-m-d');
+            break;
+
+        case 'Rolling 7':
+        case 'Rolling 7 Days':
+            $secondaryStart = date('Y-m-d', strtotime('-6 days')); // includes today
+            $secondaryEnd = date('Y-m-d', strtotime('tomorrow'));
+            break;
+
+        case 'This Week (Sun-Sat)':
+            $secondaryStart = date('Y-m-d', strtotime('last Sunday', strtotime('tomorrow')));
+            $secondaryEnd = date('Y-m-d', strtotime('next Sunday'));
+            break;
+
+        case 'Last Week (Sun-Sat)':
+            $secondaryStart = date('Y-m-d', strtotime('last Sunday -7 days'));
+            $secondaryEnd = date('Y-m-d', strtotime('last Sunday'));
+            break;
+
+        case 'Rolling 30':
+        case 'Rolling 30 Days':
+            $secondaryStart = date('Y-m-d', strtotime('-29 days')); // includes today
+            $secondaryEnd = date('Y-m-d', strtotime('tomorrow'));
+            break;
+
+        case 'This Month to Date':
+            $secondaryStart = date('Y-m-01');
+            $secondaryEnd = date('Y-m-d', strtotime('tomorrow'));
+            break;
+
+        case 'Last Month':
+            $secondaryStart = date('Y-m-01', strtotime('first day of last month'));
+            $secondaryEnd = date('Y-m-d', strtotime('first day of this month'));
+            break;
+
+        case 'Year to Date':
+            $secondaryStart = date('Y-01-01');
+            $secondaryEnd = date('Y-m-d', strtotime('tomorrow'));
+            break;
+
+        case 'YTD':
+            $secondaryStart = date('Y-01-01');
+            $secondaryEnd = date('Y-m-d', strtotime('tomorrow'));
+            break;
+
+        case 'Custom Dates':
+            $secondaryStart = isset($_GET['secondaryStartDate']) ? $_GET['secondaryStartDate'] : date('Y-m-d', strtotime('-29 days'));
+            $secondaryEnd = isset($_GET['secondaryEndDate']) ? $_GET['secondaryEndDate'] : date('Y-m-d', strtotime('tomorrow'));
+            break;
+
+        default:
+            $secondaryStart = date('Y-m-d', strtotime('-29 days'));
+            $secondaryEnd = date('Y-m-d', strtotime('tomorrow'));
+            break;
+        }
+    }
+
     if(array_key_exists('test', $_GET)){
 
     }else{
@@ -376,6 +446,200 @@ if ($_SERVER['REQUEST_METHOD'] == 'OPTIONS') {
             $scorecardData['score'] = $score;
             
             $responseData['confirmersScorecards'][] = $scorecardData;
+        }
+    }
+
+    // Fetch secondary data for performance metrics if secondaryDateRange is provided
+    $responseData['secondarySettersCalls'] = [];
+    $responseData['secondaryConfirmersCalls'] = [];
+    $responseData['secondaryHours'] = [];
+    $responseData['secondarySettersScorecards'] = [];
+    $responseData['secondaryConfirmersScorecards'] = [];
+    
+    if(array_key_exists('secondaryDateRange', $_GET)){
+        // Fetch secondary setters calls
+        $secondarySettersCallsQuery = "SELECT emp_user_12, LastName, cls_Calls.id as id, FirstName, CallDate, ResultCode, cty_id, Connected, Pitched, Positive, qualified FROM cls_Calls LEFT JOIN clr_CallResults ON ResultCode = clr_CallResults.id LEFT JOIN emp_Employees ON emp_id = emp_Employees.id LEFT JOIN lds_Leads ON cls_Calls.lds_id = lds_Leads.id LEFT JOIN srs_SourceSubs ON lds_Leads.srs_id = srs_SourceSubs.id WHERE CallDate BETWEEN '$secondaryStart' AND '$secondaryEnd' AND ResultCode NOT LIKE '%ND%' AND Dialer = 'True' AND emp_user_12 > 0 AND cty_id != 'C'";
+        $secondarySettersCalls = curlCall("$endpoint/lp/customReport.php?rptSQL=" . urlencode($secondarySettersCallsQuery));
+
+        // Fetch secondary confirmers calls
+        $secondaryConfirmersCallsQuery = "SELECT emp_user_12, LastName, cls_Calls.id as id, FirstName, CallDate, ResultCode, cty_id, Connected, Pitched, Positive, qualified FROM cls_Calls LEFT JOIN clr_CallResults ON ResultCode = clr_CallResults.id LEFT JOIN emp_Employees ON emp_id = emp_Employees.id LEFT JOIN lds_Leads ON cls_Calls.lds_id = lds_Leads.id LEFT JOIN srs_SourceSubs ON lds_Leads.srs_id = srs_SourceSubs.id WHERE CallDate BETWEEN '$secondaryStart' AND '$secondaryEnd' AND ResultCode NOT LIKE '%ND%' AND Dialer = 'True' AND emp_user_12 > 0 AND cty_id = 'C'";
+        $secondaryConfirmersCalls = curlCall("$endpoint/lp/customReport.php?rptSQL=" . urlencode($secondaryConfirmersCallsQuery));
+
+        // Get deputy IDs for secondary data
+        $secondaryDeputyIDs = [];
+        foreach($secondarySettersCalls as $call){
+            if(!in_array($call['emp_user_12'], $secondaryDeputyIDs)){
+                $secondaryDeputyIDs[] = $call['emp_user_12'];
+            }
+        }
+        foreach($secondaryConfirmersCalls as $call){
+            if(!in_array($call['emp_user_12'], $secondaryDeputyIDs)){
+                $secondaryDeputyIDs[] = $call['emp_user_12'];
+            }
+        }
+
+        // Fetch timesheets for secondary date range
+        $secondaryTimesheetEmployees = [];
+        foreach($secondaryDeputyIDs as $deputyID){
+            $theseTimesheets = curlCall("$endpoint/deputy/getTimesheets.php?startDate=$secondaryStart&endDate=$secondaryEnd&id=" . intval($deputyID));
+            foreach($theseTimesheets as $timesheet){
+                if($timesheet['IsInProgress']){
+                    $timesheet['EndTimeLocalized'] = date('Y-m-d H:i:s');
+                }
+                $employeeID = $timesheet['Employee'];
+                if(!array_key_exists($employeeID, $secondaryTimesheetEmployees)){
+                    $secondaryTimesheetEmployees[$employeeID] = ['hours' => 0];
+                }
+                if($timesheet['IsInProgress'] && isset($timesheet['StartTimeLocalized'])){
+                    $currentTime = date('Y-m-d H:i:s');
+                    $secondaryTimesheetEmployees[$employeeID]['hours'] += (strtotime($currentTime) - strtotime($timesheet['StartTimeLocalized'])) / 60 / 60;
+                }else if(isset($timesheet['TotalTime']) && $timesheet['TotalTime'] !== '' && $timesheet['TotalTime'] !== null){
+                    $secondaryTimesheetEmployees[$employeeID]['hours'] += floatval($timesheet['TotalTime']);
+                }else if(isset($timesheet['StartTimeLocalized']) && isset($timesheet['EndTimeLocalized'])){
+                    $secondaryTimesheetEmployees[$employeeID]['hours'] += (strtotime($timesheet['EndTimeLocalized']) - strtotime($timesheet['StartTimeLocalized'])) / 60 / 60;
+                }
+            }
+        }
+
+        // Process secondary setters calls
+        foreach($secondarySettersCalls as $call){
+            if(!array_key_exists(intval($call['emp_user_12']), $secondaryTimesheetEmployees)){
+                continue;
+            }
+            $secondaryTimesheetEmployees[intval($call['emp_user_12'])]['employee'] = $call['FirstName'] . " " . $call['LastName'];
+            $responseData['secondarySettersCalls'][] = [
+                'id' => $call['id'],
+                'employee' => $call['FirstName'] . " " . $call['LastName'],
+                'date' => $call['CallDate'],
+                'result' => $call['ResultCode'],
+                'cty_id' => $call['cty_id'],
+                'connected' => $call['Connected'],
+                'pitched' => $call['Pitched'],
+                'positive' => $call['Positive'],
+                'qualified' => ($call['qualified'] == 1 ? true : false),
+            ];
+        }
+
+        // Process secondary confirmers calls
+        foreach($secondaryConfirmersCalls as $call){
+            if(!array_key_exists(intval($call['emp_user_12']), $secondaryTimesheetEmployees)){
+                continue;
+            }
+            $secondaryTimesheetEmployees[intval($call['emp_user_12'])]['employee'] = $call['FirstName'] . " " . $call['LastName'];
+            $responseData['secondaryConfirmersCalls'][] = [
+                'id' => $call['id'],
+                'employee' => $call['FirstName'] . " " . $call['LastName'],
+                'date' => $call['CallDate'],
+                'result' => $call['ResultCode'],
+                'cty_id' => $call['cty_id'],
+                'connected' => $call['Connected'],
+                'pitched' => $call['Pitched'],
+                'positive' => $call['Positive'],
+                'qualified' => ($call['qualified'] == 1 ? true : false),
+            ];
+        }
+
+        $responseData['secondaryHours'] = array_values($secondaryTimesheetEmployees);
+
+        // Fetch secondary scorecards
+        $secondaryQueryEndDate = date('Y-m-d', strtotime($secondaryEnd . ' -1 day'));
+        
+        $secondarySettersScorecardsQuery = "SELECT id, form_id, status, created_at, updated_at, variables_used, form_data, responses FROM form_instances 
+            WHERE DATE(STR_TO_DATE(variables_used->>'$.CallDate','%Y-%m-%d %H:%i:%s.%f')) BETWEEN '$secondaryStart' AND '$secondaryQueryEndDate'
+            AND form_id = 11 
+            AND status = 'completed'";
+        
+        $secondarySettersScorecardsRaw = $integrityDB->query($secondarySettersScorecardsQuery);
+        
+        $secondaryConfirmersScorecardsQuery = "SELECT id, form_id, status, created_at, updated_at, variables_used, form_data, responses FROM form_instances 
+            WHERE DATE(STR_TO_DATE(variables_used->>'$.CallDate','%Y-%m-%d %H:%i:%s.%f')) BETWEEN '$secondaryStart' AND '$secondaryQueryEndDate'
+            AND form_id = 12 
+            AND status = 'completed'";
+        
+        $secondaryConfirmersScorecardsRaw = $integrityDB->query($secondaryConfirmersScorecardsQuery);
+
+        // Process secondary setters scorecards
+        foreach($secondarySettersScorecardsRaw as $scorecard){
+            $scorecardData = [
+                'id' => $scorecard['id'] ?? null,
+                'form_instance_id' => $scorecard['id'] ?? null,
+                'form_id' => $scorecard['form_id'] ?? null,
+                'status' => $scorecard['status'] ?? null,
+                'created_at' => $scorecard['created_at'] ?? null,
+                'updated_at' => $scorecard['updated_at'] ?? null,
+            ];
+            
+            $employeeName = null;
+            $callDate = null;
+            if(isset($scorecard['variables_used'])){
+                $variables = is_string($scorecard['variables_used']) 
+                    ? json_decode($scorecard['variables_used'], true) 
+                    : $scorecard['variables_used'];
+                
+                if(is_array($variables)){
+                    $callDate = $variables['CallDate'] ?? null;
+                    $empFirstName = $variables['EmpFirstName'] ?? null;
+                    $empLastName = $variables['EmpLastName'] ?? null;
+                    if($empFirstName && $empLastName){
+                        $employeeName = trim($empFirstName) . " " . trim($empLastName);
+                    }
+                }
+            }
+            
+            $scorecardData['callDate'] = $callDate;
+            $scorecardData['employee'] = $employeeName;
+            
+            $maxTotal = calculateMaxTotal($scorecard['form_data'] ?? null);
+            $actualTotal = calculateActualTotal($scorecard['responses'] ?? null);
+            $score = $maxTotal > 0 ? round(($actualTotal / $maxTotal) * 100, 2) : 0;
+            
+            $scorecardData['maxTotal'] = $maxTotal;
+            $scorecardData['actualTotal'] = $actualTotal;
+            $scorecardData['score'] = $score;
+            
+            $responseData['secondarySettersScorecards'][] = $scorecardData;
+        }
+
+        // Process secondary confirmers scorecards
+        foreach($secondaryConfirmersScorecardsRaw as $scorecard){
+            $scorecardData = [
+                'id' => $scorecard['id'] ?? null,
+                'form_instance_id' => $scorecard['id'] ?? null,
+                'form_id' => $scorecard['form_id'] ?? null,
+                'status' => $scorecard['status'] ?? null,
+                'created_at' => $scorecard['created_at'] ?? null,
+                'updated_at' => $scorecard['updated_at'] ?? null,
+            ];
+            
+            $employeeName = null;
+            $callDate = null;
+            if(isset($scorecard['variables_used'])){
+                $variables = is_string($scorecard['variables_used']) 
+                    ? json_decode($scorecard['variables_used'], true) 
+                    : $scorecard['variables_used'];
+                
+                if(is_array($variables)){
+                    $callDate = $variables['CallDate'] ?? null;
+                    $empFirstName = $variables['EmpFirstName'] ?? null;
+                    $empLastName = $variables['EmpLastName'] ?? null;
+                    if($empFirstName && $empLastName){
+                        $employeeName = trim($empFirstName) . " " . trim($empLastName);
+                    }
+                }
+            }
+            
+            $scorecardData['callDate'] = $callDate;
+            $scorecardData['employee'] = $employeeName;
+            
+            $maxTotal = calculateMaxTotal($scorecard['form_data'] ?? null);
+            $actualTotal = calculateActualTotal($scorecard['responses'] ?? null);
+            $score = $maxTotal > 0 ? round(($actualTotal / $maxTotal) * 100, 2) : 0;
+            
+            $scorecardData['maxTotal'] = $maxTotal;
+            $scorecardData['actualTotal'] = $actualTotal;
+            $scorecardData['score'] = $score;
+            
+            $responseData['secondaryConfirmersScorecards'][] = $scorecardData;
         }
     }
     
