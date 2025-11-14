@@ -599,12 +599,13 @@ export function DashboardContent() {
                   title="Horsepower"
                   value={settersMetrics.horsepower}
                   unit="HP"
-                  color={getGaugeColor(settersMetrics.horsepower, [40.5, 51.5, 66.5, 89.5])}
+                  color={getGaugeColor(settersMetrics.horsepower, [40, 51, 67, 90])}
                   subtitle="Combined Performance Score"
+                  target={67}
                   ranges={[
-                    { label: "Bad", min: 0, max: 40, color: "#ef4444" },
-                    { label: "Average", min: 41, max: 51, color: "#f97316" },
-                    { label: "Good", min: 52, max: 66, color: "#eab308" },
+                    { label: "Bad", min: 0, max: 39, color: "#ef4444" },
+                    { label: "Average", min: 40, max: 50, color: "#f97316" },
+                    { label: "Good", min: 51, max: 66, color: "#eab308" },
                     { label: "Excellent", min: 67, max: 89, color: "#22c55e" },
                     { label: "Elite", min: 90, max: 100, color: "#3b82f6" },
                   ]}
@@ -615,6 +616,8 @@ export function DashboardContent() {
                   unit="s"
                   color={getInverseGaugeColor(settersMetrics.checkoutToDialTime, [90, 60, 45, 30])}
                   subtitle="Team Metric • Speed"
+                  target={30}
+                  inverted={true}
                   ranges={[
                     { label: "Elite", min: 0, max: 29, color: "#3b82f6" },
                     { label: "Excellent", min: 30, max: 44, color: "#22c55e" },
@@ -629,6 +632,7 @@ export function DashboardContent() {
                   unit="pts"
                   color={getGaugeColor(settersMetrics.skillScore, [64, 74, 84, 94])}
                   subtitle="Overall Skill Rating"
+                  target={85}
                   ranges={[
                     { label: "Bad", min: 0, max: 64, color: "#ef4444" },
                     { label: "Average", min: 65, max: 74, color: "#f97316" },
@@ -668,6 +672,7 @@ export function DashboardContent() {
                 title="Dials Per Hour"
                 value={settersMetrics.dialsPerHour}
                 max={100}
+                target={29}
                 color={getGaugeColor(settersMetrics.dialsPerHour, [22, 25, 29, 34])}
                 unit=""
                 size="small"
@@ -683,6 +688,7 @@ export function DashboardContent() {
                 title="Connection %"
                 value={settersMetrics.connectionRate}
                 max={100}
+                target={19}
                 color={getGaugeColor(settersMetrics.connectionRate, [15, 17, 19, 21])}
                 unit="%"
                 size="small"
@@ -698,21 +704,23 @@ export function DashboardContent() {
                 title="Pitch %"
                 value={settersMetrics.pitchRate}
                 max={100}
-                color={getGaugeColor(settersMetrics.pitchRate, [90, 95, 97, 99])}
+                target={75}
+                color={getGaugeColor(settersMetrics.pitchRate, [65, 70, 75, 80])}
                 unit="%"
                 size="small"
                 ranges={[
-                  { label: "Bad", min: 0, max: 89, color: "#ef4444" },
-                  { label: "Average", min: 90, max: 94, color: "#f97316" },
-                  { label: "Good", min: 95, max: 96, color: "#eab308" },
-                  { label: "Excellent", min: 97, max: 98, color: "#22c55e" },
-                  { label: "Elite", min: 99, color: "#3b82f6" },
+                  { label: "Bad", min: 0, max: 64, color: "#ef4444" },
+                  { label: "Average", min: 65, max: 69, color: "#f97316" },
+                  { label: "Good", min: 70, max: 74, color: "#eab308" },
+                  { label: "Excellent", min: 75, max: 79, color: "#22c55e" },
+                  { label: "Elite", min: 80, color: "#3b82f6" },
                 ]}
               />
               <CircularGauge
                 title="Conversion %"
                 value={settersMetrics.conversionRate}
                 max={100}
+                target={33}
                 color={getGaugeColor(settersMetrics.conversionRate, [22, 27, 33, 40])}
                 unit="%"
                 size="small"
@@ -728,6 +736,7 @@ export function DashboardContent() {
                 title="ScoreCard"
                 value={settersMetrics.scoreCard}
                 max={100}
+                target={90}
                 color={getGaugeColor(settersMetrics.scoreCard, [69, 79, 89, 99])}
                 unit="%"
                 size="small"
@@ -743,6 +752,7 @@ export function DashboardContent() {
                 title="Conversion % (Qualified)"
                 value={settersMetrics.conversionQualified}
                 max={100}
+                target={85}
                 color={getGaugeColor(settersMetrics.conversionQualified, [64, 74, 84, 94])}
                 unit="%"
                 size="small"
@@ -758,6 +768,7 @@ export function DashboardContent() {
                 title="Conversion % (Un-Qualified)"
                 value={settersMetrics.conversionUnqualified}
                 max={100}
+                target={33}
                 color={getGaugeColor(settersMetrics.conversionUnqualified, [21, 26, 32, 39])}
                 unit="%"
                 size="small"
@@ -773,15 +784,16 @@ export function DashboardContent() {
                 title="Gross Issue"
                 value={settersMetrics.grossIssue}
                 max={100}
-                color={getGaugeColor(settersMetrics.grossIssue, [22, 27, 33, 40])}
+                target={81}
+                color={getGaugeColor(settersMetrics.grossIssue, [70, 75, 81, 85])}
                 unit="%"
                 size="small"
                 ranges={[
-                  { label: "Bad", min: 0, max: 21, color: "#ef4444" },
-                  { label: "Average", min: 22, max: 26, color: "#f97316" },
-                  { label: "Good", min: 27, max: 32, color: "#eab308" },
-                  { label: "Excellent", min: 33, max: 39, color: "#22c55e" },
-                  { label: "Elite", min: 40, color: "#3b82f6" },
+                  { label: "Bad", min: 0, max: 69, color: "#ef4444" },
+                  { label: "Average", min: 70, max: 74, color: "#f97316" },
+                  { label: "Good", min: 75, max: 80, color: "#eab308" },
+                  { label: "Excellent", min: 81, max: 84, color: "#22c55e" },
+                  { label: "Elite", min: 85, color: "#3b82f6" },
                 ]}
               />
             </div>
@@ -814,6 +826,7 @@ export function DashboardContent() {
                 title="Contact Rate"
                 value={confirmersMetrics.contactRate}
                 max={100}
+                target={85}
                 color={getGaugeColor(confirmersMetrics.contactRate, [74.9, 79.9, 84.9, 89.9])}
                 unit="%"
                 ranges={[
@@ -828,6 +841,7 @@ export function DashboardContent() {
                 title="Gross Issue Rate"
                 value={confirmersMetrics.grossIssueRate}
                 max={100}
+                target={81}
                 color={getGaugeColor(confirmersMetrics.grossIssueRate, [69.9, 74.9, 80.9, 84.9])}
                 unit="%"
                 ranges={[
@@ -842,6 +856,7 @@ export function DashboardContent() {
                 title="Net Issue Rate"
                 value={confirmersMetrics.netIssueRate}
                 max={100}
+                target={88}
                 color={getGaugeColor(confirmersMetrics.netIssueRate, [81.9, 85.9, 87.9, 91.9])}
                 unit="%"
                 ranges={[
@@ -856,6 +871,7 @@ export function DashboardContent() {
                 title="1-Leg Rate"
                 value={confirmersMetrics.oneLegsRate}
                 max={100}
+                target={80}
                 color={getGaugeColor(confirmersMetrics.oneLegsRate, [69.9, 74.9, 79.9, 84.9])}
                 unit="%"
                 ranges={[
@@ -870,6 +886,7 @@ export function DashboardContent() {
                 title="Scorecard"
                 value={confirmersMetrics.scorecard}
                 max={100}
+                target={80}
                 color={getGaugeColor(confirmersMetrics.scorecard, [59.9, 69.9, 79.9, 89.9])}
                 unit="%"
                 ranges={[

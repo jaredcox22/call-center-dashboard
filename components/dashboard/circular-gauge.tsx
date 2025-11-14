@@ -21,9 +21,10 @@ interface CircularGaugeProps {
   inverted?: boolean
   size?: "small" | "medium" | "large"
   ranges?: MetricRange[]
+  target?: number
 }
 
-export function CircularGauge({ title, value, max, color, unit, inverted = false, size = "medium", ranges }: CircularGaugeProps) {
+export function CircularGauge({ title, value, max, color, unit, inverted = false, size = "medium", ranges, target }: CircularGaugeProps) {
   const [animatedValue, setAnimatedValue] = useState(0)
 
   useEffect(() => {
@@ -141,9 +142,11 @@ export function CircularGauge({ title, value, max, color, unit, inverted = false
           <span className={`text-muted-foreground ${config.unitClass}`}>{unit}</span>
         </div>
       </div>
-      <div className={`text-center text-muted-foreground ${config.targetClass}`}>
-        {inverted ? `Target: < ${max}${unit}` : `Target: ${max}${unit}`}
-      </div>
+      {target !== undefined && (
+        <div className={`text-center text-muted-foreground ${config.targetClass}`}>
+          {inverted ? `Target: < ${target}${unit}` : `Target: ${target}${unit}`}
+        </div>
+      )}
     </Card>
   )
 }

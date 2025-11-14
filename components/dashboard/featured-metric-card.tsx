@@ -19,9 +19,11 @@ interface FeaturedMetricCardProps {
   color: string
   subtitle?: string
   ranges?: MetricRange[]
+  target?: number
+  inverted?: boolean
 }
 
-export function FeaturedMetricCard({ title, value, unit, color, subtitle, ranges }: FeaturedMetricCardProps) {
+export function FeaturedMetricCard({ title, value, unit, color, subtitle, ranges, target, inverted = false }: FeaturedMetricCardProps) {
   const [animatedValue, setAnimatedValue] = useState(0)
 
   useEffect(() => {
@@ -73,6 +75,11 @@ export function FeaturedMetricCard({ title, value, unit, color, subtitle, ranges
           <span className="ml-1 text-2xl md:text-3xl lg:text-4xl">{unit}</span>
         </div>
         {subtitle && <p className="text-sm text-muted-foreground">{subtitle}</p>}
+        {target !== undefined && (
+          <p className="mt-2 text-xs text-muted-foreground">
+            {inverted ? `Target: < ${target}${unit}` : `Target: ${target}${unit}`}
+          </p>
+        )}
       </div>
     </Card>
   )
