@@ -1190,7 +1190,7 @@ export function DashboardContent() {
                   pitches={employee.pitches}
                   conversions={employee.conversions}
                   hours={employee.hours}
-                  horsepower={employee.horsepower}
+                  horsepower={dashboardType === 'setters' ? employee.horsepower : undefined}
                 />
               ))}
             </div>
