@@ -9,9 +9,10 @@ interface EmployeeIndicatorProps {
   pitches: number
   conversions: number
   hours?: number
+  horsepower?: number
 }
 
-export function EmployeeIndicator({ name, dials, connections, pitches, conversions, hours }: EmployeeIndicatorProps) {
+export function EmployeeIndicator({ name, dials, connections, pitches, conversions, hours, horsepower }: EmployeeIndicatorProps) {
 
   return (
     <Card className="p-4">
@@ -39,6 +40,12 @@ export function EmployeeIndicator({ name, dials, connections, pitches, conversio
           <span className="text-muted-foreground">Conversions:</span>
           <span className="font-medium text-green-500">{conversions}</span>
         </div>
+        {horsepower !== undefined && (
+          <div className="flex justify-between text-sm">
+            <span className="text-muted-foreground">Horsepower:</span>
+            <span className="font-medium">{horsepower} HP</span>
+          </div>
+        )}
       </div>
     </Card>
   )

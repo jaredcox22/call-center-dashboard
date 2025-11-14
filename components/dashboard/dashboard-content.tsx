@@ -137,17 +137,29 @@ const transformApiData = (apiData: any, selectedEmployee: string, dashboardType:
 
   // Calculate per-employee stats
   callsByEmployee.forEach((calls, employeeName) => {
+    const dials = calls.length
     const connected = calls.filter((c: any) => c.connected === 1).length
     const pitched = calls.filter((c: any) => c.pitched === 1).length
     const positive = calls.filter((c: any) => c.positive === 1).length
     const hours = hoursByEmployee.get(employeeName) || 0
     
+    // Calculate horsepower per employee using the same formula as team metric
+    const horsepower = dials > 0 && hours > 0
+      ? Math.round(
+          ((dials - connected) + 
+          ((connected - pitched) * 1.5) + 
+          ((pitched - positive) * 4) + 
+          (positive * 10)) / hours
+        )
+      : 0
+    
     employees.set(employeeName, {
-      dials: calls.length,
+      dials,
       connections: connected,
       conversions: positive,
       pitches: pitched,
       hours: hours,
+      horsepower: horsepower,
     })
   })
   
@@ -228,6 +240,7 @@ const transformApiData = (apiData: any, selectedEmployee: string, dashboardType:
       pitches: (stats as any).pitches,
       conversions: (stats as any).conversions,
       hours: (stats as any).hours,
+      horsepower: (stats as any).horsepower,
     })),
     settersMetrics: {
       dialsPerHour,
@@ -1177,6 +1190,7 @@ export function DashboardContent() {
                   pitches={employee.pitches}
                   conversions={employee.conversions}
                   hours={employee.hours}
+                  horsepower={employee.horsepower}
                 />
               ))}
             </div>
