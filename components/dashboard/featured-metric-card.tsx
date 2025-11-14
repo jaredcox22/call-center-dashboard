@@ -5,6 +5,22 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 import { Info } from "lucide-react"
 import { useEffect, useState } from "react"
 
+/**
+ * Formats seconds into a human-readable minutes and seconds format
+ * Examples: 45 -> "45s", 90 -> "1m 30s", 125 -> "2m 5s"
+ */
+const formatSecondsToMinutes = (seconds: number): string => {
+  if (seconds < 60) {
+    return `${seconds}s`
+  }
+  const minutes = Math.floor(seconds / 60)
+  const remainingSeconds = seconds % 60
+  if (remainingSeconds === 0) {
+    return `${minutes}m`
+  }
+  return `${minutes}m ${remainingSeconds}s`
+}
+
 interface MetricRange {
   label: string
   min: number
@@ -21,9 +37,10 @@ interface FeaturedMetricCardProps {
   ranges?: MetricRange[]
   target?: number
   inverted?: boolean
+  formattedValue?: string // Optional formatted value to display instead of animated number
 }
 
-export function FeaturedMetricCard({ title, value, unit, color, subtitle, ranges, target, inverted = false }: FeaturedMetricCardProps) {
+export function FeaturedMetricCard({ title, value, unit, color, subtitle, ranges, target, inverted = false, formattedValue }: FeaturedMetricCardProps) {
   const [animatedValue, setAnimatedValue] = useState(0)
 
   useEffect(() => {
@@ -56,7 +73,14 @@ export function FeaturedMetricCard({ title, value, unit, color, subtitle, ranges
                       <span className="font-medium">{range.label}</span>
                     </div>
                     <span className="text-muted-foreground">
-                      {range.min}{unit}{range.max !== undefined ? ` - ${range.max}${unit}` : '+'}
+                      {formattedValue !== undefined && unit === ""
+                        ? (range.max !== undefined 
+                            ? `${formatSecondsToMinutes(range.min)} - ${formatSecondsToMinutes(range.max)}`
+                            : `${formatSecondsToMinutes(range.min)}+`)
+                        : (range.max !== undefined 
+                            ? `${range.min}${unit} - ${range.max}${unit}`
+                            : `${range.min}${unit}+`)
+                      }
                     </span>
                   </div>
                 ))}
@@ -71,13 +95,20 @@ export function FeaturedMetricCard({ title, value, unit, color, subtitle, ranges
           className="mb-3 text-5xl font-bold transition-all duration-1000 ease-out md:text-6xl lg:text-7xl"
           style={{ color }}
         >
-          {animatedValue}
-          <span className="ml-1 text-2xl md:text-3xl lg:text-4xl">{unit}</span>
+          {formattedValue !== undefined ? formattedValue : (
+            <>
+              {animatedValue}
+              <span className="ml-1 text-2xl md:text-3xl lg:text-4xl">{unit}</span>
+            </>
+          )}
         </div>
         {subtitle && <p className="text-sm text-muted-foreground">{subtitle}</p>}
         {target !== undefined && (
           <p className="mt-2 text-xs text-muted-foreground">
-            {inverted ? `Target: < ${target}${unit}` : `Target: ${target}${unit}`}
+            {formattedValue !== undefined && unit === "" 
+              ? (inverted ? `Target: < ${formatSecondsToMinutes(target)}` : `Target: ${formatSecondsToMinutes(target)}`)
+              : (inverted ? `Target: < ${target}${unit}` : `Target: ${target}${unit}`)
+            }
           </p>
         )}
       </div>

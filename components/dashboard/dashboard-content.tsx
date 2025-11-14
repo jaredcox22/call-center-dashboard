@@ -42,6 +42,22 @@ const fetcher = async (url: string) => {
   return response.json()
 }
 
+/**
+ * Formats seconds into a human-readable minutes and seconds format
+ * Examples: 45 -> "45s", 90 -> "1m 30s", 125 -> "2m 5s"
+ */
+const formatSecondsToMinutes = (seconds: number): string => {
+  if (seconds < 60) {
+    return `${seconds}s`
+  }
+  const minutes = Math.floor(seconds / 60)
+  const remainingSeconds = seconds % 60
+  if (remainingSeconds === 0) {
+    return `${minutes}m`
+  }
+  return `${minutes}m ${remainingSeconds}s`
+}
+
 const buildApiUrl = (
   dateRange: string, 
   customRange?: { from: Date | undefined; to?: Date | undefined },
@@ -167,9 +183,19 @@ const transformApiData = (apiData: any, selectedEmployee: string, dashboardType:
     scoreCard = totalMax > 0 ? Math.round((totalActual / totalMax) * 100) : 0
   }
   
-  // Calculate horsepower (composite score) - capped at 100, return 0 if no data
-  const horsepower = totalCalls > 0 
-    ? Math.min(100, Math.round((dialsPerHour * 2) + (connectionRate * 3) + (conversionRate * 5)))
+  // Calculate horsepower using weighted point system (normalized per hour):
+  // - No connection: 1 point per dial
+  // - Connected but no pitch: 1.5 points per connection
+  // - Pitched but no conversion: 4 points per pitch
+  // - Conversion: 10 points per positive
+  // Formula: ((Dials - Connected) + ((Connected - Pitched) * 1.5) + ((Pitched - Positive) * 4) + (Positive * 10)) / Total Hours
+  const horsepower = totalCalls > 0 && totalHours > 0
+    ? Math.round(
+        ((totalCalls - totalConnected) + 
+        ((totalConnected - totalPitched) * 1.5) + 
+        ((totalPitched - totalPositive) * 4) + 
+        (totalPositive * 10)) / totalHours
+      )
     : 0
   
   // Calculate skill score using new formula:
@@ -198,6 +224,7 @@ const transformApiData = (apiData: any, selectedEmployee: string, dashboardType:
       name,
       dials: (stats as any).dials,
       connections: (stats as any).connections,
+      pitches: (stats as any).pitches,
       conversions: (stats as any).conversions,
       hours: (stats as any).hours,
     })),
@@ -678,7 +705,8 @@ export function DashboardContent() {
                 <FeaturedMetricCard
                   title="Checkout to Dial Time"
                   value={settersMetrics.checkoutToDialTime}
-                  unit="s"
+                  unit=""
+                  formattedValue={formatSecondsToMinutes(settersMetrics.checkoutToDialTime)}
                   color={getInverseGaugeColor(settersMetrics.checkoutToDialTime, [90, 60, 45, 30])}
                   subtitle="Team Metric • Speed"
                   target={30}
@@ -1142,6 +1170,7 @@ export function DashboardContent() {
                   name={employee.name}
                   dials={employee.dials}
                   connections={employee.connections}
+                  pitches={employee.pitches}
                   conversions={employee.conversions}
                   hours={employee.hours}
                 />

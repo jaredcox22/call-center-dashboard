@@ -6,11 +6,12 @@ interface EmployeeIndicatorProps {
   name: string
   dials: number
   connections: number
+  pitches: number
   conversions: number
   hours?: number
 }
 
-export function EmployeeIndicator({ name, dials, connections, conversions, hours }: EmployeeIndicatorProps) {
+export function EmployeeIndicator({ name, dials, connections, pitches, conversions, hours }: EmployeeIndicatorProps) {
 
   return (
     <Card className="p-4">
@@ -29,6 +30,10 @@ export function EmployeeIndicator({ name, dials, connections, conversions, hours
         <div className="flex justify-between text-sm">
           <span className="text-muted-foreground">Connections:</span>
           <span className="font-medium">{connections}</span>
+        </div>
+        <div className="flex justify-between text-sm">
+          <span className="text-muted-foreground">Pitched:</span>
+          <span className="font-medium">{pitches}</span>
         </div>
         <div className="flex justify-between text-sm">
           <span className="text-muted-foreground">Conversions:</span>

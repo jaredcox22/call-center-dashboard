@@ -644,7 +644,10 @@ if ($_SERVER['REQUEST_METHOD'] == 'OPTIONS') {
     }
     
     $query = "SELECT
+                lds_Leads.id as 'leadId',
                 lds_Leads.cst_id,
+                lds_Leads.srs_id as 'srs_id',
+                lds_Leads.DateEntered as 'DateEntered',
                 in1_InboundQueue1.DateReceived as 'DateReceived',
                 in1_InboundQueue1.CheckOutDate as 'CheckOutDate',
                 cRef.CallDate as 'CallDate',
@@ -689,11 +692,41 @@ if ($_SERVER['REQUEST_METHOD'] == 'OPTIONS') {
     $rtdData = curlCall("$endpoint/lp/customReport.php?rptSQL=" . urlencode($query));
     $responseData['stl'] = [];
     foreach($rtdData as $response){
-        $responseData['stl'][] = [
-            'employee' => $response['FirstName'] . " " . $response['LastName'],
-            'stl' => getBusinessHourDiff($response['CheckOutDate'], $response['CallDate']),
-            'cst_id' => $response['cst_id'],
-        ];
+        // Exclude records matching srs_id == 6 exclusion criteria (matching getData.php logic)
+        if(isset($response['srs_id']) && $response['srs_id'] == 6 && 
+           isset($response['DateEntered']) && 
+           strtotime($response['DateEntered']) >= strtotime("2024-01-01") && 
+           strtotime($response['DateEntered']) <= strtotime("2025-03-26")){
+            // Skip this record - matches exclusion criteria
+            continue;
+        }
+        
+        // Only calculate STL if CallDate exists (matching getData.php logic)
+        if(!isset($response['CallDate']) || empty($response['CallDate'])){
+            // Skip this record - no CallDate available
+            continue;
+        }
+        
+        // Only calculate if DateReceived exists (already filtered in WHERE clause, but double-check for safety)
+        if(!isset($response['DateReceived']) || empty($response['DateReceived'])){
+            continue;
+        }
+        
+        // Calculate STL (checkout to dial time) using business hours
+        $stlValue = getBusinessHourDiff($response['CheckOutDate'], $response['CallDate']);
+        
+        // Only add to array if we have a valid calculation
+        if($stlValue !== null){
+            $responseData['stl'][] = [
+                'leadId' => $response['leadId'] ?? null,
+                'employee' => $response['FirstName'] . " " . $response['LastName'],
+                'stl' => $stlValue,
+                'cst_id' => $response['cst_id'],
+                'dateReceived' => $response['DateReceived'] ?? null,
+                'checkOutDate' => $response['CheckOutDate'] ?? null,
+                'callDate' => $response['CallDate'] ?? null,
+            ];
+        }
     }
 
     $rtpDB = new db("promotion_flags", "intserver-intapps");
