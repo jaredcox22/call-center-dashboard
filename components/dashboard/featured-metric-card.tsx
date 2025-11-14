@@ -2,7 +2,7 @@
 
 import { Card } from "@/components/ui/card"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
-import { Info } from "lucide-react"
+import { Info, Table2 } from "lucide-react"
 import { useEffect, useState } from "react"
 
 /**
@@ -38,9 +38,11 @@ interface FeaturedMetricCardProps {
   target?: number
   inverted?: boolean
   formattedValue?: string // Optional formatted value to display instead of animated number
+  showDataIcon?: boolean // Show data table icon in top left
+  onViewData?: () => void // Callback when data icon is clicked
 }
 
-export function FeaturedMetricCard({ title, value, unit, color, subtitle, ranges, target, inverted = false, formattedValue }: FeaturedMetricCardProps) {
+export function FeaturedMetricCard({ title, value, unit, color, subtitle, ranges, target, inverted = false, formattedValue, showDataIcon = false, onViewData }: FeaturedMetricCardProps) {
   const [animatedValue, setAnimatedValue] = useState(0)
 
   useEffect(() => {
@@ -52,6 +54,15 @@ export function FeaturedMetricCard({ title, value, unit, color, subtitle, ranges
 
   return (
     <Card className="p-8 min-h-[200px] flex items-center justify-center relative">
+      {showDataIcon && onViewData && (
+        <button 
+          onClick={onViewData}
+          className="absolute left-3 top-3 text-muted-foreground hover:text-foreground transition-colors"
+          aria-label="View data table"
+        >
+          <Table2 className="h-4 w-4" />
+        </button>
+      )}
       {ranges && ranges.length > 0 && (
         <Popover>
           <PopoverTrigger asChild>

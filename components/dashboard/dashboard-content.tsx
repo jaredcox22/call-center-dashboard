@@ -11,6 +11,7 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 import { CircularGauge } from "./circular-gauge"
 import { EmployeeIndicator } from "./employee-indicator"
 import { FeaturedMetricCard } from "./featured-metric-card"
+import { STLDataTable } from "./stl-data-table"
 import { LogOut, RefreshCw, Moon, Sun, Menu, CalendarIcon, AlertCircle, Users } from "lucide-react"
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetTrigger } from "@/components/ui/sheet"
 import {
@@ -271,6 +272,7 @@ export function DashboardContent() {
   })
   const [datePickerOpen, setDatePickerOpen] = useState(false)
   const [mobilePickerOpen, setMobilePickerOpen] = useState(false)
+  const [stlTableOpen, setStlTableOpen] = useState(false)
   
   // Secondary date range state for performance metrics
   const [secondaryTimePeriod, setSecondaryTimePeriod] = useState("Rolling 30 Days")
@@ -711,6 +713,8 @@ export function DashboardContent() {
                   subtitle="Team Metric • Speed"
                   target={120}
                   inverted={true}
+                  showDataIcon={true}
+                  onViewData={() => setStlTableOpen(true)}
                   ranges={[
                     { label: "Elite", min: 0, max: 60, color: "#3b82f6" },
                     { label: "Excellent", min: 61, max: 120, color: "#22c55e" },
@@ -1182,6 +1186,15 @@ export function DashboardContent() {
 
       {/* Loading Overlay - Only show on initial load, not when waiting for custom date selection */}
       {!data && !(timePeriod === 'Custom Dates' && (!confirmedDateRange.from || !confirmedDateRange.to)) && !(secondaryTimePeriod === 'Custom Dates' && (!secondaryConfirmedDateRange.from || !secondaryConfirmedDateRange.to)) && <LoadingScreen />}
+
+      {/* STL Data Table Dialog */}
+      {rawData && rawData.stl && (
+        <STLDataTable
+          data={rawData.stl}
+          open={stlTableOpen}
+          onOpenChange={setStlTableOpen}
+        />
+      )}
     </div>
   )
 }
