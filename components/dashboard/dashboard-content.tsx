@@ -707,16 +707,16 @@ export function DashboardContent() {
                   value={settersMetrics.checkoutToDialTime}
                   unit=""
                   formattedValue={formatSecondsToMinutes(settersMetrics.checkoutToDialTime)}
-                  color={getInverseGaugeColor(settersMetrics.checkoutToDialTime, [90, 60, 45, 30])}
+                  color={getInverseGaugeColor(settersMetrics.checkoutToDialTime, [240, 180, 120, 60])}
                   subtitle="Team Metric • Speed"
-                  target={30}
+                  target={120}
                   inverted={true}
                   ranges={[
-                    { label: "Elite", min: 0, max: 29, color: "#3b82f6" },
-                    { label: "Excellent", min: 30, max: 44, color: "#22c55e" },
-                    { label: "Good", min: 45, max: 59, color: "#eab308" },
-                    { label: "Average", min: 60, max: 89, color: "#f97316" },
-                    { label: "Bad", min: 90, color: "#ef4444" },
+                    { label: "Elite", min: 0, max: 60, color: "#3b82f6" },
+                    { label: "Excellent", min: 61, max: 120, color: "#22c55e" },
+                    { label: "Good", min: 121, max: 180, color: "#eab308" },
+                    { label: "Average", min: 181, max: 240, color: "#f97316" },
+                    { label: "Bad", min: 241, color: "#ef4444" },
                   ]}
                 />
               </div>
