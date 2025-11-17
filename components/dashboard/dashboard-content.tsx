@@ -718,6 +718,7 @@ export function DashboardContent() {
                     { label: "Excellent", min: 67, max: 89, color: "#22c55e" },
                     { label: "Elite", min: 90, max: 100, color: "#3b82f6" },
                   ]}
+                  formula="((Dials - Connected) + ((Connected - Pitched) × 1.5) + ((Pitched - Positive) × 4) + (Positive × 10)) ÷ Total Hours"
                 />
                 <FeaturedMetricCard
                   title="Checkout to Dial Time"
@@ -737,6 +738,7 @@ export function DashboardContent() {
                     { label: "Average", min: 181, max: 240, color: "#f97316" },
                     { label: "Bad", min: 241, color: "#ef4444" },
                   ]}
+                  formula="Average STL (checkout to dial time) in seconds"
                 />
               </div>
             )}
@@ -776,6 +778,7 @@ export function DashboardContent() {
                   { label: "Excellent", min: 29, max: 33, color: "#22c55e" },
                   { label: "Elite", min: 34, color: "#3b82f6" },
                 ]}
+                formula="Total Calls ÷ Total Hours"
               />
               <CircularGauge
                 title="Connection %"
@@ -792,6 +795,7 @@ export function DashboardContent() {
                   { label: "Excellent", min: 19, max: 20, color: "#22c55e" },
                   { label: "Elite", min: 21, color: "#3b82f6" },
                 ]}
+                formula="(Total Connected ÷ Total Calls) × 100"
               />
               <CircularGauge
                 title="Pitch %"
@@ -808,6 +812,7 @@ export function DashboardContent() {
                   { label: "Excellent", min: 75, max: 79, color: "#22c55e" },
                   { label: "Elite", min: 80, color: "#3b82f6" },
                 ]}
+                formula="(Total Pitched ÷ Total Connected) × 100"
               />
               <CircularGauge
                 title="Conversion %"
@@ -824,6 +829,7 @@ export function DashboardContent() {
                   { label: "Excellent", min: 33, max: 39, color: "#22c55e" },
                   { label: "Elite", min: 40, color: "#3b82f6" },
                 ]}
+                formula="(Total Positive ÷ Total Pitched) × 100"
               />
             </div>
             )}
@@ -992,6 +998,7 @@ export function DashboardContent() {
                           { label: "Excellent", min: 85, max: 94, color: "#22c55e" },
                           { label: "Elite", min: 95, max: 100, color: "#3b82f6" },
                         ]}
+                        formula="100 × (0.40 × SCnorm + 0.10 × QCRnorm + 0.30 × UCRnorm + 0.20 × GIRnorm) where SCnorm = SC ÷ 100, QCRnorm = QCR ÷ 100, UCRnorm = UCR ÷ 40, GIRnorm = GIR ÷ 85"
                       />
                     </div>
                     {/* Other Metrics Grid */}
@@ -1011,6 +1018,7 @@ export function DashboardContent() {
                           { label: "Excellent", min: 90, max: 99, color: "#22c55e" },
                           { label: "Elite", min: 100, max: 100, color: "#3b82f6" },
                         ]}
+                        formula="(Sum of actualTotals ÷ Sum of maxTotals) × 100"
                       />
                       <CircularGauge
                         title="Conversion % (Qualified)"
@@ -1027,6 +1035,7 @@ export function DashboardContent() {
                           { label: "Excellent", min: 85, max: 94, color: "#22c55e" },
                           { label: "Elite", min: 95, max: 100, color: "#3b82f6" },
                         ]}
+                        formula="(Total Qualified ÷ Total Pitched) × 100"
                       />
                       <CircularGauge
                         title="Conversion % (Un-Qualified)"
@@ -1043,6 +1052,7 @@ export function DashboardContent() {
                           { label: "Excellent", min: 33, max: 39, color: "#22c55e" },
                           { label: "Elite", min: 40, max: 100, color: "#3b82f6" },
                         ]}
+                        formula="(Total Unqualified ÷ Total Pitched) × 100"
                       />
                       <CircularGauge
                         title="Gross Issue"
@@ -1059,6 +1069,7 @@ export function DashboardContent() {
                           { label: "Excellent", min: 81, max: 84, color: "#22c55e" },
                           { label: "Elite", min: 85, color: "#3b82f6" },
                         ]}
+                        formula="(Total Positive ÷ Total Calls) × 100"
                       />
                     </div>
                   </>

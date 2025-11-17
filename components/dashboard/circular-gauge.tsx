@@ -22,9 +22,10 @@ interface CircularGaugeProps {
   size?: "small" | "medium" | "large"
   ranges?: MetricRange[]
   target?: number
+  formula?: string // Optional formula to display in performance ranges popover
 }
 
-export function CircularGauge({ title, value, max, color, unit, inverted = false, size = "medium", ranges, target }: CircularGaugeProps) {
+export function CircularGauge({ title, value, max, color, unit, inverted = false, size = "medium", ranges, target, formula }: CircularGaugeProps) {
   const [animatedValue, setAnimatedValue] = useState(0)
 
   useEffect(() => {
@@ -103,6 +104,15 @@ export function CircularGauge({ title, value, max, color, unit, inverted = false
                   </div>
                 ))}
               </div>
+              {formula && (
+                <>
+                  <div className="border-t border-border pt-2 mt-2">
+                    <p className="text-[10px] text-muted-foreground font-mono leading-relaxed">
+                      {formula}
+                    </p>
+                  </div>
+                </>
+              )}
             </div>
           </PopoverContent>
         </Popover>

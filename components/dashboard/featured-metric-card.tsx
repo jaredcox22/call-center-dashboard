@@ -40,9 +40,10 @@ interface FeaturedMetricCardProps {
   formattedValue?: string // Optional formatted value to display instead of animated number
   showDataIcon?: boolean // Show data table icon in top left
   onViewData?: () => void // Callback when data icon is clicked
+  formula?: string // Optional formula to display in performance ranges popover
 }
 
-export function FeaturedMetricCard({ title, value, unit, color, subtitle, ranges, target, inverted = false, formattedValue, showDataIcon = false, onViewData }: FeaturedMetricCardProps) {
+export function FeaturedMetricCard({ title, value, unit, color, subtitle, ranges, target, inverted = false, formattedValue, showDataIcon = false, onViewData, formula }: FeaturedMetricCardProps) {
   const [animatedValue, setAnimatedValue] = useState(0)
 
   useEffect(() => {
@@ -96,6 +97,15 @@ export function FeaturedMetricCard({ title, value, unit, color, subtitle, ranges
                   </div>
                 ))}
               </div>
+              {formula && (
+                <>
+                  <div className="border-t border-border pt-2 mt-2">
+                    <p className="text-[10px] text-muted-foreground font-mono leading-relaxed">
+                      {formula}
+                    </p>
+                  </div>
+                </>
+              )}
             </div>
           </PopoverContent>
         </Popover>
