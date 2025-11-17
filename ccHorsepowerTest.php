@@ -872,7 +872,22 @@ if ($_SERVER['REQUEST_METHOD'] == 'OPTIONS') {
 				$startDOW = date('w', strtotime($startDate));         
 			}
 			if(array_key_exists($endDOW, $ccHours)){
-				$difference += strtotime($end) - strtotime("$endDate " . $ccHours[$endDOW]['start']);
+				$endBusinessStart = strtotime("$endDate " . $ccHours[$endDOW]['start']);
+				$endBusinessEnd = strtotime("$endDate " . $ccHours[$endDOW]['end']);
+				$endTime = strtotime($end);
+				
+				// If call is before business hours start, count as 0 seconds
+				if($endTime < $endBusinessStart){
+					// Don't add anything (0 seconds)
+				}
+				// If call is after business hours end, cap at end of business hours
+				else if($endTime > $endBusinessEnd){
+					$difference += $endBusinessEnd - $endBusinessStart;
+				}
+				// Normal case: call is within business hours
+				else{
+					$difference += $endTime - $endBusinessStart;
+				}
 			}
 		}
 		if($difference < 0){

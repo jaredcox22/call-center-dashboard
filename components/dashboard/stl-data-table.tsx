@@ -22,19 +22,31 @@ import { Button } from "@/components/ui/button"
 import { format } from "date-fns"
 
 /**
- * Formats seconds into a human-readable minutes and seconds format
- * Examples: 45 -> "45s", 90 -> "1m 30s", 125 -> "2m 5s"
+ * Formats seconds into a human-readable hours, minutes, and seconds format
+ * Examples: 45 -> "45s", 90 -> "1m 30s", 125 -> "2m 5s", 3665 -> "1h 1m 5s"
  */
 const formatSecondsToMinutes = (seconds: number): string => {
   if (seconds < 60) {
     return `${seconds}s`
   }
-  const minutes = Math.floor(seconds / 60)
+  
+  const hours = Math.floor(seconds / 3600)
+  const minutes = Math.floor((seconds % 3600) / 60)
   const remainingSeconds = seconds % 60
-  if (remainingSeconds === 0) {
-    return `${minutes}m`
+  
+  const parts: string[] = []
+  
+  if (hours > 0) {
+    parts.push(`${hours}h`)
   }
-  return `${minutes}m ${remainingSeconds}s`
+  if (minutes > 0) {
+    parts.push(`${minutes}m`)
+  }
+  if (remainingSeconds > 0 || parts.length === 0) {
+    parts.push(`${remainingSeconds}s`)
+  }
+  
+  return parts.join(' ')
 }
 
 /**
