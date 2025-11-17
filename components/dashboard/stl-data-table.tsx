@@ -17,9 +17,11 @@ import {
   TableRow,
 } from "@/components/ui/table"
 import { Input } from "@/components/ui/input"
-import { ArrowUpDown, ArrowUp, ArrowDown } from "lucide-react"
+import { ArrowUpDown, ArrowUp, ArrowDown, Info, ChevronDown } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { format } from "date-fns"
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible"
 
 /**
  * Formats seconds into a human-readable hours, minutes, and seconds format
@@ -85,6 +87,7 @@ export function STLDataTable({ data, open, onOpenChange }: STLDataTableProps) {
   const [searchQuery, setSearchQuery] = useState("")
   const [sortField, setSortField] = useState<SortField>("stl")
   const [sortDirection, setSortDirection] = useState<SortDirection>("asc")
+  const [isInfoOpen, setIsInfoOpen] = useState(false)
 
   // Filter and sort data
   const filteredAndSortedData = useMemo(() => {
@@ -169,6 +172,43 @@ export function STLDataTable({ data, open, onOpenChange }: STLDataTableProps) {
         </DialogHeader>
 
         <div className="flex flex-col gap-4 flex-1 min-h-0 px-6 pb-6">
+          {/* Informational Alert - Collapsible */}
+          <Collapsible open={isInfoOpen} onOpenChange={setIsInfoOpen}>
+            <Alert 
+              className={isInfoOpen ? '' : 'border-0 bg-transparent px-0 py-2'}
+            >
+              <Info className="h-4 w-4" />
+              <div className="flex-1">
+                <CollapsibleTrigger asChild>
+                  <AlertTitle className="cursor-pointer hover:underline flex items-center gap-2">
+                    About This Data
+                    <ChevronDown 
+                      className={`h-4 w-4 transition-transform duration-200 ${
+                        isInfoOpen ? 'transform rotate-180' : ''
+                      }`} 
+                    />
+                  </AlertTitle>
+                </CollapsibleTrigger>
+                <CollapsibleContent>
+                  <AlertDescription>
+                    <div className="space-y-2 pt-2">
+                      <p>
+                        <strong>What's included:</strong> This table shows records where a lead was checked out within the selected date range, 
+                        has a received date (inbound lead), and has a valid call date (first call that's not a "no dial" result code). 
+                        Certain source records are excluded per business rules.
+                      </p>
+                      <p>
+                        <strong>Note about 0-second values:</strong> Records with 0 seconds STL time are excluded from the average calculation 
+                        shown in the metric card. These occur when the checkout date and call date both fall outside active business hours 
+                        (e.g., both before opening or after closing). Only active business hours are counted in the STL calculation to 
+                        provide an accurate measure of operational speed.
+                      </p>
+                    </div>
+                  </AlertDescription>
+                </CollapsibleContent>
+              </div>
+            </Alert>
+          </Collapsible>
           {/* Search Input */}
           <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
             <Input

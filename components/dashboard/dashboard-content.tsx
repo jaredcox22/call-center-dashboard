@@ -175,8 +175,10 @@ const transformApiData = (apiData: any, selectedEmployee: string, dashboardType:
   const totalHours = filteredHours.reduce((sum: number, h: any) => sum + h.hours, 0)
   
   // Calculate average STL (checkout to dial time) in seconds - TEAM metric only
-  const avgStl = teamStl.length > 0 
-    ? teamStl.reduce((sum: number, s: any) => sum + s.stl, 0) / teamStl.length
+  // Only include STL values greater than 0 in the average
+  const validStl = teamStl.filter((s: any) => s.stl > 0)
+  const avgStl = validStl.length > 0 
+    ? validStl.reduce((sum: number, s: any) => sum + s.stl, 0) / validStl.length
     : 0
   
   // Calculate metrics - return 0 if no data
