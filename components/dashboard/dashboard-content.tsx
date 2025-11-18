@@ -59,6 +59,114 @@ const formatSecondsToMinutes = (seconds: number): string => {
   return `${minutes}m ${remainingSeconds}s`
 }
 
+/**
+ * Converts 24-hour format (0-23) to 12-hour format string for display
+ * Examples: 0 -> "12 AM", 8 -> "8 AM", 13 -> "1 PM", 23 -> "11 PM"
+ */
+const formatHourTo12Hour = (hour: number): string => {
+  if (hour === 0) return "12 AM"
+  if (hour < 12) return `${hour} AM`
+  if (hour === 12) return "12 PM"
+  return `${hour - 12} PM`
+}
+
+/**
+ * Converts 12-hour format string to 24-hour format (0-23)
+ * Examples: "12 AM" -> 0, "8 AM" -> 8, "1 PM" -> 13, "11 PM" -> 23
+ */
+const parse12HourTo24Hour = (timeStr: string): number => {
+  const match = timeStr.match(/(\d+)\s*(AM|PM)/i)
+  if (!match) return 0
+  let hour = parseInt(match[1])
+  const period = match[2].toUpperCase()
+  if (period === "AM") {
+    if (hour === 12) return 0
+    return hour
+  } else {
+    if (hour === 12) return 12
+    return hour + 12
+  }
+}
+
+/**
+ * Extracts hour from date string (format: "2025-11-18 08:08:00.553")
+ */
+const extractHourFromDateString = (dateString: string): number => {
+  try {
+    const date = new Date(dateString)
+    return date.getHours()
+  } catch {
+    return 0
+  }
+}
+
+/**
+ * Checks if an hour falls within the time range
+ * Range is inclusive of start, exclusive of end (unless end is 0, then it's 24)
+ */
+const isHourInTimeRange = (hour: number, startHour: number | undefined, endHour: number | undefined): boolean => {
+  if (startHour === undefined || endHour === undefined) {
+    return true // All Day - include all hours
+  }
+  
+  // Handle edge case: endHour === 0 means midnight (24)
+  const effectiveEndHour = endHour === 0 ? 24 : endHour
+  
+  // Range is inclusive of start, exclusive of end
+  return hour >= startHour && hour < effectiveEndHour
+}
+
+/**
+ * Calculates the number of hours in a time range
+ */
+const calculateHoursInTimeRange = (startHour: number | undefined, endHour: number | undefined): number => {
+  if (startHour === undefined || endHour === undefined) {
+    return 24 // All Day - 24 hours
+  }
+  
+  // Handle edge case: endHour === 0 means midnight (24)
+  const effectiveEndHour = endHour === 0 ? 24 : endHour
+  
+  if (startHour <= effectiveEndHour) {
+    // Normal case: e.g., 8 AM - 5 PM = 9 hours
+    return effectiveEndHour - startHour
+  } else {
+    // Wraps around midnight: e.g., 8 PM - 8 AM = 12 hours
+    return (24 - startHour) + effectiveEndHour
+  }
+}
+
+/**
+ * Generates hour options for Select dropdown (0-23 as "12 AM", "1 AM", ..., "11 PM")
+ */
+const generateHourOptions = () => {
+  const options = [{ value: "all-day", label: "All Day" }]
+  for (let hour = 0; hour < 24; hour++) {
+    options.push({ value: hour.toString(), label: formatHourTo12Hour(hour) })
+  }
+  return options
+}
+
+/**
+ * Formats date range button text with optional time range
+ */
+const formatDateRangeButtonText = (
+  from: Date | undefined,
+  to: Date | undefined,
+  timeRange?: { startHour: number | undefined; endHour: number | undefined }
+): string => {
+  if (!from || !to) return "Pick dates"
+  
+  const dateText = `${format(from, "MMM d, yyyy")} - ${format(to, "MMM d, yyyy")}`
+  
+  if (timeRange && timeRange.startHour !== undefined && timeRange.endHour !== undefined) {
+    const timeText = `${formatHourTo12Hour(timeRange.startHour)} - ${formatHourTo12Hour(timeRange.endHour)}`
+    return `${dateText} (${timeText})`
+  }
+  
+  return dateText
+}
+
 const buildApiUrl = (
   dateRange: string, 
   customRange?: { from: Date | undefined; to?: Date | undefined },
@@ -92,7 +200,12 @@ const buildApiUrl = (
   return `${baseUrl}?${params.toString()}`
 }
 
-const transformApiData = (apiData: any, selectedEmployee: string, dashboardType: 'setters' | 'confirmers') => {
+const transformApiData = (
+  apiData: any, 
+  selectedEmployee: string, 
+  dashboardType: 'setters' | 'confirmers',
+  timeRange?: { startHour: number | undefined; endHour: number | undefined }
+) => {
   // Use the appropriate calls array based on dashboard type
   const callsKey = dashboardType === 'setters' ? 'settersCalls' : 'confirmersCalls'
   const allCalls = apiData[callsKey] || []
@@ -104,13 +217,33 @@ const transformApiData = (apiData: any, selectedEmployee: string, dashboardType:
   // Keep team-wide STL data (checkout to dial time is a TEAM metric)
   const teamStl = apiData.stl || []
   
+  // Filter data by time range if provided
+  let timeFilteredCalls = allCalls
+  if (timeRange && (timeRange.startHour !== undefined || timeRange.endHour !== undefined)) {
+    timeFilteredCalls = allCalls.filter((call: any) => {
+      if (!call.date) return false
+      const hour = extractHourFromDateString(call.date)
+      return isHourInTimeRange(hour, timeRange.startHour, timeRange.endHour)
+    })
+  }
+  
+  // Filter STL data by time range if provided
+  let timeFilteredStl = teamStl
+  if (timeRange && (timeRange.startHour !== undefined || timeRange.endHour !== undefined)) {
+    timeFilteredStl = teamStl.filter((stl: any) => {
+      if (!stl.callDate) return false
+      const hour = extractHourFromDateString(stl.callDate)
+      return isHourInTimeRange(hour, timeRange.startHour, timeRange.endHour)
+    })
+  }
+  
   // Filter data by employee if not "all"
-  let filteredCalls = allCalls
+  let filteredCalls = timeFilteredCalls
   let filteredHours = apiData.hours || []
   let filteredScorecards = allScorecards
   
   if (selectedEmployee !== 'all') {
-    filteredCalls = allCalls.filter((call: any) => call.employee === selectedEmployee)
+    filteredCalls = timeFilteredCalls.filter((call: any) => call.employee === selectedEmployee)
     filteredHours = apiData.hours?.filter((h: any) => h.employee === selectedEmployee) || []
     filteredScorecards = allScorecards.filter((scorecard: any) => scorecard.employee === selectedEmployee)
   }
@@ -131,7 +264,16 @@ const transformApiData = (apiData: any, selectedEmployee: string, dashboardType:
   const hoursByEmployee = new Map<string, number>()
   filteredHours.forEach((h: any) => {
     if (h.employee) {
-      hoursByEmployee.set(h.employee, h.hours || 0)
+      let adjustedHours = h.hours || 0
+      
+      // Adjust hours based on time range if provided
+      if (timeRange && (timeRange.startHour !== undefined || timeRange.endHour !== undefined)) {
+        const hoursInRange = calculateHoursInTimeRange(timeRange.startHour, timeRange.endHour)
+        // Proportionally adjust: originalHours * (hoursInRange / 24)
+        adjustedHours = hoursInRange;
+      }
+      
+      hoursByEmployee.set(h.employee, adjustedHours)
     }
   })
 
@@ -171,12 +313,12 @@ const transformApiData = (apiData: any, selectedEmployee: string, dashboardType:
   const totalQualified = filteredCalls.filter((c: any) => c.qualified === true).length
   const totalUnqualified = filteredCalls.filter((c: any) => c.qualified === false && c.positive === 1).length
   
-  // Calculate total hours
-  const totalHours = filteredHours.reduce((sum: number, h: any) => sum + h.hours, 0)
+  // Calculate total hours (using adjusted hours if time range is provided)
+  const totalHours = Array.from(hoursByEmployee.values()).reduce((sum: number, hours: number) => sum + hours, 0)
   
   // Calculate average STL (checkout to dial time) in seconds - TEAM metric only
   // Only include STL values greater than 0 in the average
-  const validStl = teamStl.filter((s: any) => s.stl > 0)
+  const validStl = timeFilteredStl.filter((s: any) => s.stl > 0)
   const avgStl = validStl.length > 0 
     ? validStl.reduce((sum: number, s: any) => sum + s.stl, 0) / validStl.length
     : 0
@@ -289,6 +431,16 @@ export function DashboardContent() {
   const [mobilePickerOpen, setMobilePickerOpen] = useState(false)
   const [stlTableOpen, setStlTableOpen] = useState(false)
   
+  // Time range state for primary date range
+  const [customTimeRange, setCustomTimeRange] = useState<{ startHour: number | undefined; endHour: number | undefined }>({
+    startHour: undefined,
+    endHour: undefined
+  })
+  const [confirmedTimeRange, setConfirmedTimeRange] = useState<{ startHour: number | undefined; endHour: number | undefined }>({
+    startHour: undefined,
+    endHour: undefined
+  })
+  
   // Secondary date range state for performance metrics
   const [secondaryTimePeriod, setSecondaryTimePeriod] = useState("Rolling 30 Days")
   const [secondaryCustomDateRange, setSecondaryCustomDateRange] = useState<{ from: Date | undefined; to?: Date | undefined }>({ 
@@ -301,6 +453,16 @@ export function DashboardContent() {
   })
   const [secondaryDatePickerOpen, setSecondaryDatePickerOpen] = useState(false)
   const [secondaryMobilePickerOpen, setSecondaryMobilePickerOpen] = useState(false)
+  
+  // Time range state for secondary date range
+  const [secondaryCustomTimeRange, setSecondaryCustomTimeRange] = useState<{ startHour: number | undefined; endHour: number | undefined }>({
+    startHour: undefined,
+    endHour: undefined
+  })
+  const [secondaryConfirmedTimeRange, setSecondaryConfirmedTimeRange] = useState<{ startHour: number | undefined; endHour: number | undefined }>({
+    startHour: undefined,
+    endHour: undefined
+  })
 
   // Track user activity for session management
   useActivityTracker()
@@ -323,7 +485,7 @@ export function DashboardContent() {
     dedupingInterval: 10000,
   })
 
-  const data = rawData ? transformApiData(rawData, selectedEmployee, dashboardType) : null
+  const data = rawData ? transformApiData(rawData, selectedEmployee, dashboardType, confirmedTimeRange) : null
   const secondaryData = rawData ? transformApiData(
     {
       settersCalls: rawData.secondarySettersCalls || [],
@@ -334,7 +496,8 @@ export function DashboardContent() {
       stl: [], // STL is team-wide, not needed for secondary metrics
     },
     selectedEmployee,
-    dashboardType
+    dashboardType,
+    secondaryConfirmedTimeRange
   ) : null
   console.log(data);
   // Get unique employees from the appropriate calls array based on dashboard type
@@ -365,6 +528,8 @@ export function DashboardContent() {
     if (timePeriod !== 'Custom Dates') {
       setCustomDateRange({ from: undefined, to: undefined })
       setConfirmedDateRange({ from: undefined, to: undefined })
+      setCustomTimeRange({ startHour: undefined, endHour: undefined })
+      setConfirmedTimeRange({ startHour: undefined, endHour: undefined })
     }
   }, [timePeriod])
 
@@ -373,12 +538,15 @@ export function DashboardContent() {
     if (secondaryTimePeriod !== 'Custom Dates') {
       setSecondaryCustomDateRange({ from: undefined, to: undefined })
       setSecondaryConfirmedDateRange({ from: undefined, to: undefined })
+      setSecondaryCustomTimeRange({ startHour: undefined, endHour: undefined })
+      setSecondaryConfirmedTimeRange({ startHour: undefined, endHour: undefined })
     }
   }, [secondaryTimePeriod])
 
   const handleDateRangeOk = () => {
     if (customDateRange.from && customDateRange.to) {
       setConfirmedDateRange(customDateRange)
+      setConfirmedTimeRange(customTimeRange)
       setDatePickerOpen(false)
       setMobilePickerOpen(false)
     }
@@ -387,11 +555,14 @@ export function DashboardContent() {
   const handleDateRangeReset = () => {
     setCustomDateRange({ from: undefined, to: undefined })
     setConfirmedDateRange({ from: undefined, to: undefined })
+    setCustomTimeRange({ startHour: undefined, endHour: undefined })
+    setConfirmedTimeRange({ startHour: undefined, endHour: undefined })
   }
 
   const handleSecondaryDateRangeOk = () => {
     if (secondaryCustomDateRange.from && secondaryCustomDateRange.to) {
       setSecondaryConfirmedDateRange(secondaryCustomDateRange)
+      setSecondaryConfirmedTimeRange(secondaryCustomTimeRange)
       setSecondaryDatePickerOpen(false)
       setSecondaryMobilePickerOpen(false)
     }
@@ -400,6 +571,8 @@ export function DashboardContent() {
   const handleSecondaryDateRangeReset = () => {
     setSecondaryCustomDateRange({ from: undefined, to: undefined })
     setSecondaryConfirmedDateRange({ from: undefined, to: undefined })
+    setSecondaryCustomTimeRange({ startHour: undefined, endHour: undefined })
+    setSecondaryConfirmedTimeRange({ startHour: undefined, endHour: undefined })
   }
 
   const getGaugeColor = (value: number, thresholds: number[]) => {
@@ -428,6 +601,18 @@ export function DashboardContent() {
     setShowLogoutDialog(false)
     logout()
   }
+
+  // Filter STL data by time range if provided
+  const filteredStlData = rawData && rawData.stl ? (() => {
+    if (timePeriod === 'Custom Dates' && confirmedTimeRange && (confirmedTimeRange.startHour !== undefined || confirmedTimeRange.endHour !== undefined)) {
+      return rawData.stl.filter((stl: any) => {
+        if (!stl.callDate) return false
+        const hour = extractHourFromDateString(stl.callDate)
+        return isHourInTimeRange(hour, confirmedTimeRange.startHour, confirmedTimeRange.endHour)
+      })
+    }
+    return rawData.stl
+  })() : []
 
   if (error) {
     return (
@@ -586,9 +771,7 @@ export function DashboardContent() {
                   <PopoverTrigger asChild>
                     <Button variant="outline" className="hidden md:flex h-9 dark:border-white/10 bg-white dark:bg-transparent font-normal">
                       <CalendarIcon className="mr-2 h-4 w-4" />
-                      {confirmedDateRange.from && confirmedDateRange.to
-                        ? `${format(confirmedDateRange.from, "MMM d, yyyy")} - ${format(confirmedDateRange.to, "MMM d, yyyy")}`
-                        : "Pick dates"}
+                      {formatDateRangeButtonText(confirmedDateRange.from, confirmedDateRange.to, confirmedTimeRange)}
                     </Button>
                   </PopoverTrigger>
                   <PopoverContent className="w-auto p-0" align="start">
@@ -604,21 +787,77 @@ export function DashboardContent() {
                       showOutsideDays={false}
                       disabled={(date) => date > new Date()}
                     />
-                    <div className="flex items-center justify-end gap-2 p-3 border-t">
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        onClick={handleDateRangeReset}
-                      >
-                        Reset
-                      </Button>
-                      <Button
-                        size="sm"
-                        onClick={handleDateRangeOk}
-                        disabled={!customDateRange.from || !customDateRange.to}
-                      >
-                        Ok
-                      </Button>
+                    <div className="p-3 border-t space-y-3">
+                      <div className="flex items-center gap-2">
+                        <div className="flex-1">
+                          <label className="text-xs text-muted-foreground mb-1 block">Start Time</label>
+                          <Select
+                            value={customTimeRange.startHour === undefined ? "all-day" : customTimeRange.startHour.toString()}
+                            onValueChange={(value) => {
+                              setCustomTimeRange(prev => ({
+                                ...prev,
+                                startHour: value === "all-day" ? undefined : parseInt(value)
+                              }))
+                            }}
+                          >
+                            <SelectTrigger className="h-8">
+                              <SelectValue />
+                            </SelectTrigger>
+                            <SelectContent>
+                              {generateHourOptions().map(option => (
+                                <SelectItem key={option.value} value={option.value}>
+                                  {option.label}
+                                </SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                        </div>
+                        <div className="flex-1">
+                          <label className="text-xs text-muted-foreground mb-1 block">End Time</label>
+                          <Select
+                            value={customTimeRange.endHour === undefined ? "all-day" : customTimeRange.endHour.toString()}
+                            onValueChange={(value) => {
+                              setCustomTimeRange(prev => ({
+                                ...prev,
+                                endHour: value === "all-day" ? undefined : parseInt(value)
+                              }))
+                            }}
+                          >
+                            <SelectTrigger className="h-8">
+                              <SelectValue />
+                            </SelectTrigger>
+                            <SelectContent>
+                              {generateHourOptions().map(option => (
+                                <SelectItem key={option.value} value={option.value}>
+                                  {option.label}
+                                </SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                        </div>
+                      </div>
+                      <div className="flex items-center justify-end gap-2">
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={handleDateRangeReset}
+                        >
+                          Reset
+                        </Button>
+                        <Button
+                          size="sm"
+                          onClick={handleDateRangeOk}
+                          disabled={
+                            !customDateRange.from || 
+                            !customDateRange.to || 
+                            (customTimeRange.startHour !== undefined && customTimeRange.endHour === undefined) ||
+                            (customTimeRange.endHour !== undefined && customTimeRange.startHour === undefined) ||
+                            (customTimeRange.startHour !== undefined && customTimeRange.endHour !== undefined && customTimeRange.startHour > customTimeRange.endHour && customTimeRange.endHour !== 0)
+                          }
+                        >
+                          Ok
+                        </Button>
+                      </div>
                     </div>
                   </PopoverContent>
                 </Popover>
@@ -642,9 +881,7 @@ export function DashboardContent() {
                   <PopoverTrigger asChild>
                     <Button variant="outline" className="flex md:hidden h-9 dark:border-white/10 bg-white dark:bg-transparent font-normal">
                       <CalendarIcon className="mr-2 h-4 w-4" />
-                      {confirmedDateRange.from && confirmedDateRange.to
-                        ? `${format(confirmedDateRange.from, "MMM d, yyyy")} - ${format(confirmedDateRange.to, "MMM d, yyyy")}`
-                        : "Pick dates"}
+                      {formatDateRangeButtonText(confirmedDateRange.from, confirmedDateRange.to, confirmedTimeRange)}
                     </Button>
                   </PopoverTrigger>
                   <PopoverContent className="w-auto p-0" align="start">
@@ -660,21 +897,77 @@ export function DashboardContent() {
                       showOutsideDays={false}
                       disabled={(date) => date > new Date()}
                     />
-                    <div className="flex items-center justify-end gap-2 p-3 border-t">
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        onClick={handleDateRangeReset}
-                      >
-                        Reset
-                      </Button>
-                      <Button
-                        size="sm"
-                        onClick={handleDateRangeOk}
-                        disabled={!customDateRange.from || !customDateRange.to}
-                      >
-                        Ok
-                      </Button>
+                    <div className="p-3 border-t space-y-3">
+                      <div className="flex items-center gap-2">
+                        <div className="flex-1">
+                          <label className="text-xs text-muted-foreground mb-1 block">Start Time</label>
+                          <Select
+                            value={customTimeRange.startHour === undefined ? "all-day" : customTimeRange.startHour.toString()}
+                            onValueChange={(value) => {
+                              setCustomTimeRange(prev => ({
+                                ...prev,
+                                startHour: value === "all-day" ? undefined : parseInt(value)
+                              }))
+                            }}
+                          >
+                            <SelectTrigger className="h-8">
+                              <SelectValue />
+                            </SelectTrigger>
+                            <SelectContent>
+                              {generateHourOptions().map(option => (
+                                <SelectItem key={option.value} value={option.value}>
+                                  {option.label}
+                                </SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                        </div>
+                        <div className="flex-1">
+                          <label className="text-xs text-muted-foreground mb-1 block">End Time</label>
+                          <Select
+                            value={customTimeRange.endHour === undefined ? "all-day" : customTimeRange.endHour.toString()}
+                            onValueChange={(value) => {
+                              setCustomTimeRange(prev => ({
+                                ...prev,
+                                endHour: value === "all-day" ? undefined : parseInt(value)
+                              }))
+                            }}
+                          >
+                            <SelectTrigger className="h-8">
+                              <SelectValue />
+                            </SelectTrigger>
+                            <SelectContent>
+                              {generateHourOptions().map(option => (
+                                <SelectItem key={option.value} value={option.value}>
+                                  {option.label}
+                                </SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                        </div>
+                      </div>
+                      <div className="flex items-center justify-end gap-2">
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={handleDateRangeReset}
+                        >
+                          Reset
+                        </Button>
+                        <Button
+                          size="sm"
+                          onClick={handleDateRangeOk}
+                          disabled={
+                            !customDateRange.from || 
+                            !customDateRange.to || 
+                            (customTimeRange.startHour !== undefined && customTimeRange.endHour === undefined) ||
+                            (customTimeRange.endHour !== undefined && customTimeRange.startHour === undefined) ||
+                            (customTimeRange.startHour !== undefined && customTimeRange.endHour !== undefined && customTimeRange.startHour > customTimeRange.endHour && customTimeRange.endHour !== 0)
+                          }
+                        >
+                          Ok
+                        </Button>
+                      </div>
                     </div>
                   </PopoverContent>
                 </Popover>
@@ -868,9 +1161,7 @@ export function DashboardContent() {
                           <PopoverTrigger asChild>
                             <Button variant="outline" className="hidden md:flex h-9 dark:border-white/10 bg-white dark:bg-transparent font-normal">
                               <CalendarIcon className="mr-2 h-4 w-4" />
-                              {secondaryConfirmedDateRange.from && secondaryConfirmedDateRange.to
-                                ? `${format(secondaryConfirmedDateRange.from, "MMM d, yyyy")} - ${format(secondaryConfirmedDateRange.to, "MMM d, yyyy")}`
-                                : "Pick dates"}
+                              {formatDateRangeButtonText(secondaryConfirmedDateRange.from, secondaryConfirmedDateRange.to, secondaryConfirmedTimeRange)}
                             </Button>
                           </PopoverTrigger>
                           <PopoverContent className="w-auto p-0" align="start">
@@ -886,21 +1177,77 @@ export function DashboardContent() {
                               showOutsideDays={false}
                               disabled={(date) => date > new Date()}
                             />
-                            <div className="flex items-center justify-end gap-2 p-3 border-t">
-                              <Button
-                                variant="outline"
-                                size="sm"
-                                onClick={handleSecondaryDateRangeReset}
-                              >
-                                Reset
-                              </Button>
-                              <Button
-                                size="sm"
-                                onClick={handleSecondaryDateRangeOk}
-                                disabled={!secondaryCustomDateRange.from || !secondaryCustomDateRange.to}
-                              >
-                                Ok
-                              </Button>
+                            <div className="p-3 border-t space-y-3">
+                              <div className="flex items-center gap-2">
+                                <div className="flex-1">
+                                  <label className="text-xs text-muted-foreground mb-1 block">Start Time</label>
+                                  <Select
+                                    value={secondaryCustomTimeRange.startHour === undefined ? "all-day" : secondaryCustomTimeRange.startHour.toString()}
+                                    onValueChange={(value) => {
+                                      setSecondaryCustomTimeRange(prev => ({
+                                        ...prev,
+                                        startHour: value === "all-day" ? undefined : parseInt(value)
+                                      }))
+                                    }}
+                                  >
+                                    <SelectTrigger className="h-8">
+                                      <SelectValue />
+                                    </SelectTrigger>
+                                    <SelectContent>
+                                      {generateHourOptions().map(option => (
+                                        <SelectItem key={option.value} value={option.value}>
+                                          {option.label}
+                                        </SelectItem>
+                                      ))}
+                                    </SelectContent>
+                                  </Select>
+                                </div>
+                                <div className="flex-1">
+                                  <label className="text-xs text-muted-foreground mb-1 block">End Time</label>
+                                  <Select
+                                    value={secondaryCustomTimeRange.endHour === undefined ? "all-day" : secondaryCustomTimeRange.endHour.toString()}
+                                    onValueChange={(value) => {
+                                      setSecondaryCustomTimeRange(prev => ({
+                                        ...prev,
+                                        endHour: value === "all-day" ? undefined : parseInt(value)
+                                      }))
+                                    }}
+                                  >
+                                    <SelectTrigger className="h-8">
+                                      <SelectValue />
+                                    </SelectTrigger>
+                                    <SelectContent>
+                                      {generateHourOptions().map(option => (
+                                        <SelectItem key={option.value} value={option.value}>
+                                          {option.label}
+                                        </SelectItem>
+                                      ))}
+                                    </SelectContent>
+                                  </Select>
+                                </div>
+                              </div>
+                              <div className="flex items-center justify-end gap-2">
+                                <Button
+                                  variant="outline"
+                                  size="sm"
+                                  onClick={handleSecondaryDateRangeReset}
+                                >
+                                  Reset
+                                </Button>
+                                <Button
+                                  size="sm"
+                                  onClick={handleSecondaryDateRangeOk}
+                                  disabled={
+                                    !secondaryCustomDateRange.from || 
+                                    !secondaryCustomDateRange.to || 
+                                    (secondaryCustomTimeRange.startHour !== undefined && secondaryCustomTimeRange.endHour === undefined) ||
+                                    (secondaryCustomTimeRange.endHour !== undefined && secondaryCustomTimeRange.startHour === undefined) ||
+                                    (secondaryCustomTimeRange.startHour !== undefined && secondaryCustomTimeRange.endHour !== undefined && secondaryCustomTimeRange.startHour > secondaryCustomTimeRange.endHour && secondaryCustomTimeRange.endHour !== 0)
+                                  }
+                                >
+                                  Ok
+                                </Button>
+                              </div>
                             </div>
                           </PopoverContent>
                         </Popover>
@@ -910,9 +1257,7 @@ export function DashboardContent() {
                           <PopoverTrigger asChild>
                             <Button variant="outline" className="flex md:hidden h-9 dark:border-white/10 bg-white dark:bg-transparent font-normal">
                               <CalendarIcon className="mr-2 h-4 w-4" />
-                              {secondaryConfirmedDateRange.from && secondaryConfirmedDateRange.to
-                                ? `${format(secondaryConfirmedDateRange.from, "MMM d, yyyy")} - ${format(secondaryConfirmedDateRange.to, "MMM d, yyyy")}`
-                                : "Pick dates"}
+                              {formatDateRangeButtonText(secondaryConfirmedDateRange.from, secondaryConfirmedDateRange.to, secondaryConfirmedTimeRange)}
                             </Button>
                           </PopoverTrigger>
                           <PopoverContent className="w-auto p-0" align="start">
@@ -928,21 +1273,77 @@ export function DashboardContent() {
                               showOutsideDays={false}
                               disabled={(date) => date > new Date()}
                             />
-                            <div className="flex items-center justify-end gap-2 p-3 border-t">
-                              <Button
-                                variant="outline"
-                                size="sm"
-                                onClick={handleSecondaryDateRangeReset}
-                              >
-                                Reset
-                              </Button>
-                              <Button
-                                size="sm"
-                                onClick={handleSecondaryDateRangeOk}
-                                disabled={!secondaryCustomDateRange.from || !secondaryCustomDateRange.to}
-                              >
-                                Ok
-                              </Button>
+                            <div className="p-3 border-t space-y-3">
+                              <div className="flex items-center gap-2">
+                                <div className="flex-1">
+                                  <label className="text-xs text-muted-foreground mb-1 block">Start Time</label>
+                                  <Select
+                                    value={secondaryCustomTimeRange.startHour === undefined ? "all-day" : secondaryCustomTimeRange.startHour.toString()}
+                                    onValueChange={(value) => {
+                                      setSecondaryCustomTimeRange(prev => ({
+                                        ...prev,
+                                        startHour: value === "all-day" ? undefined : parseInt(value)
+                                      }))
+                                    }}
+                                  >
+                                    <SelectTrigger className="h-8">
+                                      <SelectValue />
+                                    </SelectTrigger>
+                                    <SelectContent>
+                                      {generateHourOptions().map(option => (
+                                        <SelectItem key={option.value} value={option.value}>
+                                          {option.label}
+                                        </SelectItem>
+                                      ))}
+                                    </SelectContent>
+                                  </Select>
+                                </div>
+                                <div className="flex-1">
+                                  <label className="text-xs text-muted-foreground mb-1 block">End Time</label>
+                                  <Select
+                                    value={secondaryCustomTimeRange.endHour === undefined ? "all-day" : secondaryCustomTimeRange.endHour.toString()}
+                                    onValueChange={(value) => {
+                                      setSecondaryCustomTimeRange(prev => ({
+                                        ...prev,
+                                        endHour: value === "all-day" ? undefined : parseInt(value)
+                                      }))
+                                    }}
+                                  >
+                                    <SelectTrigger className="h-8">
+                                      <SelectValue />
+                                    </SelectTrigger>
+                                    <SelectContent>
+                                      {generateHourOptions().map(option => (
+                                        <SelectItem key={option.value} value={option.value}>
+                                          {option.label}
+                                        </SelectItem>
+                                      ))}
+                                    </SelectContent>
+                                  </Select>
+                                </div>
+                              </div>
+                              <div className="flex items-center justify-end gap-2">
+                                <Button
+                                  variant="outline"
+                                  size="sm"
+                                  onClick={handleSecondaryDateRangeReset}
+                                >
+                                  Reset
+                                </Button>
+                                <Button
+                                  size="sm"
+                                  onClick={handleSecondaryDateRangeOk}
+                                  disabled={
+                                    !secondaryCustomDateRange.from || 
+                                    !secondaryCustomDateRange.to || 
+                                    (secondaryCustomTimeRange.startHour !== undefined && secondaryCustomTimeRange.endHour === undefined) ||
+                                    (secondaryCustomTimeRange.endHour !== undefined && secondaryCustomTimeRange.startHour === undefined) ||
+                                    (secondaryCustomTimeRange.startHour !== undefined && secondaryCustomTimeRange.endHour !== undefined && secondaryCustomTimeRange.startHour > secondaryCustomTimeRange.endHour && secondaryCustomTimeRange.endHour !== 0)
+                                  }
+                                >
+                                  Ok
+                                </Button>
+                              </div>
                             </div>
                           </PopoverContent>
                         </Popover>
@@ -1217,7 +1618,7 @@ export function DashboardContent() {
       {/* STL Data Table Dialog */}
       {rawData && rawData.stl && (
         <STLDataTable
-          data={rawData.stl}
+          data={filteredStlData}
           open={stlTableOpen}
           onOpenChange={setStlTableOpen}
         />
