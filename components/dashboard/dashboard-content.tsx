@@ -788,8 +788,8 @@ export function DashboardContent() {
                       disabled={(date) => date > new Date()}
                     />
                     <div className="p-3 border-t space-y-3">
-                      <div className="flex items-center gap-2">
-                        <div className="flex-1">
+                      <div className="flex items-center justify-start gap-2">
+                        <div>
                           <label className="text-xs text-muted-foreground mb-1 block">Start Time</label>
                           <Select
                             value={customTimeRange.startHour === undefined ? "all-day" : customTimeRange.startHour.toString()}
@@ -812,7 +812,7 @@ export function DashboardContent() {
                             </SelectContent>
                           </Select>
                         </div>
-                        <div className="flex-1">
+                        <div>
                           <label className="text-xs text-muted-foreground mb-1 block">End Time</label>
                           <Select
                             value={customTimeRange.endHour === undefined ? "all-day" : customTimeRange.endHour.toString()}
