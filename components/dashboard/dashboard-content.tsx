@@ -708,15 +708,15 @@ export function DashboardContent() {
                   title="Horsepower"
                   value={settersMetrics.horsepower}
                   unit="HP"
-                  color={getGaugeColor(settersMetrics.horsepower, [40, 51, 67, 90])}
+                  color={getGaugeColor(settersMetrics.horsepower, [35, 44, 56, 72])}
                   subtitle="Combined Performance Score"
-                  target={67}
+                  target={56}
                   ranges={[
-                    { label: "Bad", min: 0, max: 39, color: "#ef4444" },
-                    { label: "Average", min: 40, max: 50, color: "#f97316" },
-                    { label: "Good", min: 51, max: 66, color: "#eab308" },
-                    { label: "Excellent", min: 67, max: 89, color: "#22c55e" },
-                    { label: "Elite", min: 90, max: 100, color: "#3b82f6" },
+                    { label: "Bad", min: 0, max: 34, color: "#ef4444" },
+                    { label: "Average", min: 35, max: 43, color: "#f97316" },
+                    { label: "Good", min: 44, max: 55, color: "#eab308" },
+                    { label: "Excellent", min: 56, max: 71, color: "#22c55e" },
+                    { label: "Elite", min: 72, color: "#3b82f6" },
                   ]}
                   formula="((Dials - Connected) + ((Connected - Pitched) × 1.5) + ((Pitched - Positive) × 4) + (Positive × 10)) ÷ Total Hours"
                 />
