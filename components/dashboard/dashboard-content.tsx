@@ -8,11 +8,12 @@ import { Card } from "@/components/ui/card"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Calendar } from "@/components/ui/calendar"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
+import { Checkbox } from "@/components/ui/checkbox"
 import { CircularGauge } from "./circular-gauge"
 import { EmployeeIndicator } from "./employee-indicator"
 import { FeaturedMetricCard } from "./featured-metric-card"
 import { STLDataTable } from "./stl-data-table"
-import { LogOut, RefreshCw, Moon, Sun, Menu, CalendarIcon, AlertCircle, Users } from "lucide-react"
+import { LogOut, RefreshCw, Moon, Sun, Menu, CalendarIcon, AlertCircle, Users, ChevronDown } from "lucide-react"
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetTrigger } from "@/components/ui/sheet"
 import {
   AlertDialog,
@@ -28,6 +29,7 @@ import { VisuallyHidden } from "@/components/ui/visually-hidden"
 import { useActivityTracker } from "@/hooks/use-activity-tracker"
 import { SessionWarning } from "@/components/session-warning"
 import { LoadingScreen } from "./loading-screen"
+import { FilterStorage, FilterState } from "@/lib/filter-storage"
 import useSWR from "swr"
 import { format } from "date-fns"
 
@@ -167,6 +169,96 @@ const formatDateRangeButtonText = (
   return dateText
 }
 
+/**
+ * Formats employee selection display text
+ */
+const formatEmployeeSelectionText = (selectedEmployees: string[]): string => {
+  if (selectedEmployees.length === 0) {
+    return "All Employees"
+  }
+  if (selectedEmployees.length === 1) {
+    return selectedEmployees[0]
+  }
+  if (selectedEmployees.length === 2) {
+    return `${selectedEmployees[0]}, ${selectedEmployees[1]}`
+  }
+  return `${selectedEmployees.length} selected`
+}
+
+/**
+ * Converts filter state to storage format (serializes dates)
+ */
+const serializeFilterState = (
+  selectedEmployees: string[],
+  timePeriod: string,
+  dashboardType: "setters" | "confirmers",
+  confirmedDateRange: { from: Date | undefined; to?: Date | undefined },
+  confirmedTimeRange: { startHour: number | undefined; endHour: number | undefined },
+  secondaryTimePeriod: string,
+  secondaryConfirmedDateRange: { from: Date | undefined; to?: Date | undefined },
+  secondaryConfirmedTimeRange: { startHour: number | undefined; endHour: number | undefined }
+): FilterState => {
+  return {
+    selectedEmployees,
+    timePeriod,
+    dashboardType,
+    confirmedDateRange: {
+      from: confirmedDateRange.from ? confirmedDateRange.from.toISOString() : null,
+      to: confirmedDateRange.to ? confirmedDateRange.to.toISOString() : null,
+    },
+    confirmedTimeRange: {
+      startHour: confirmedTimeRange.startHour ?? null,
+      endHour: confirmedTimeRange.endHour ?? null,
+    },
+    secondaryTimePeriod,
+    secondaryConfirmedDateRange: {
+      from: secondaryConfirmedDateRange.from ? secondaryConfirmedDateRange.from.toISOString() : null,
+      to: secondaryConfirmedDateRange.to ? secondaryConfirmedDateRange.to.toISOString() : null,
+    },
+    secondaryConfirmedTimeRange: {
+      startHour: secondaryConfirmedTimeRange.startHour ?? null,
+      endHour: secondaryConfirmedTimeRange.endHour ?? null,
+    },
+  }
+}
+
+/**
+ * Converts storage format to filter state (deserializes dates)
+ */
+const deserializeFilterState = (stored: FilterState): {
+  selectedEmployees: string[]
+  timePeriod: string
+  dashboardType: "setters" | "confirmers"
+  confirmedDateRange: { from: Date | undefined; to?: Date | undefined }
+  confirmedTimeRange: { startHour: number | undefined; endHour: number | undefined }
+  secondaryTimePeriod: string
+  secondaryConfirmedDateRange: { from: Date | undefined; to?: Date | undefined }
+  secondaryConfirmedTimeRange: { startHour: number | undefined; endHour: number | undefined }
+} => {
+  return {
+    selectedEmployees: stored.selectedEmployees,
+    timePeriod: stored.timePeriod,
+    dashboardType: stored.dashboardType,
+    confirmedDateRange: {
+      from: stored.confirmedDateRange.from ? new Date(stored.confirmedDateRange.from) : undefined,
+      to: stored.confirmedDateRange.to ? new Date(stored.confirmedDateRange.to) : undefined,
+    },
+    confirmedTimeRange: {
+      startHour: stored.confirmedTimeRange.startHour ?? undefined,
+      endHour: stored.confirmedTimeRange.endHour ?? undefined,
+    },
+    secondaryTimePeriod: stored.secondaryTimePeriod,
+    secondaryConfirmedDateRange: {
+      from: stored.secondaryConfirmedDateRange.from ? new Date(stored.secondaryConfirmedDateRange.from) : undefined,
+      to: stored.secondaryConfirmedDateRange.to ? new Date(stored.secondaryConfirmedDateRange.to) : undefined,
+    },
+    secondaryConfirmedTimeRange: {
+      startHour: stored.secondaryConfirmedTimeRange.startHour ?? undefined,
+      endHour: stored.secondaryConfirmedTimeRange.endHour ?? undefined,
+    },
+  }
+}
+
 const buildApiUrl = (
   dateRange: string, 
   customRange?: { from: Date | undefined; to?: Date | undefined },
@@ -202,7 +294,7 @@ const buildApiUrl = (
 
 const transformApiData = (
   apiData: any, 
-  selectedEmployee: string, 
+  selectedEmployees: string[], 
   dashboardType: 'setters' | 'confirmers',
   timeRange?: { startHour: number | undefined; endHour: number | undefined }
 ) => {
@@ -237,15 +329,15 @@ const transformApiData = (
     })
   }
   
-  // Filter data by employee if not "all"
+  // Filter data by employee if employees are selected
   let filteredCalls = timeFilteredCalls
   let filteredHours = apiData.hours || []
   let filteredScorecards = allScorecards
   
-  if (selectedEmployee !== 'all') {
-    filteredCalls = timeFilteredCalls.filter((call: any) => call.employee === selectedEmployee)
-    filteredHours = apiData.hours?.filter((h: any) => h.employee === selectedEmployee) || []
-    filteredScorecards = allScorecards.filter((scorecard: any) => scorecard.employee === selectedEmployee)
+  if (selectedEmployees.length > 0) {
+    filteredCalls = timeFilteredCalls.filter((call: any) => selectedEmployees.includes(call.employee))
+    filteredHours = apiData.hours?.filter((h: any) => selectedEmployees.includes(h.employee)) || []
+    filteredScorecards = allScorecards.filter((scorecard: any) => selectedEmployees.includes(scorecard.employee))
   }
   
   // Calculate metrics from raw call data
@@ -415,7 +507,8 @@ export function DashboardContent() {
   const { user, logout } = useAuth()
   const { theme, toggleTheme } = useTheme()
   const [timePeriod, setTimePeriod] = useState("Today")
-  const [selectedEmployee, setSelectedEmployee] = useState("all")
+  const [selectedEmployees, setSelectedEmployees] = useState<string[]>([])
+  const [employeeSelectOpen, setEmployeeSelectOpen] = useState(false)
   const [dashboardType, setDashboardType] = useState<"setters" | "confirmers">("setters")
   const [isMenuOpen, setIsMenuOpen] = useState(false)
   const [showLogoutDialog, setShowLogoutDialog] = useState(false)
@@ -467,6 +560,25 @@ export function DashboardContent() {
   // Track user activity for session management
   useActivityTracker()
 
+  // Load filters from localStorage on mount
+  const [filtersLoaded, setFiltersLoaded] = useState(false)
+  useEffect(() => {
+    const stored = FilterStorage.loadFilters()
+    if (stored) {
+      const deserialized = deserializeFilterState(stored)
+      setSelectedEmployees(deserialized.selectedEmployees)
+      setTimePeriod(deserialized.timePeriod)
+      setDashboardType(deserialized.dashboardType)
+      setConfirmedDateRange(deserialized.confirmedDateRange)
+      setConfirmedTimeRange(deserialized.confirmedTimeRange)
+      setSecondaryTimePeriod(deserialized.secondaryTimePeriod)
+      setSecondaryConfirmedDateRange(deserialized.secondaryConfirmedDateRange)
+      setSecondaryConfirmedTimeRange(deserialized.secondaryConfirmedTimeRange)
+    }
+    setFiltersLoaded(true)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []) // Only run once on mount
+
   // Only build API URL if we have complete date range for custom dates
   const apiUrl = (() => {
     if (timePeriod === 'Custom Dates' && (!confirmedDateRange.from || !confirmedDateRange.to)) {
@@ -485,7 +597,7 @@ export function DashboardContent() {
     dedupingInterval: 10000,
   })
 
-  const data = rawData ? transformApiData(rawData, selectedEmployee, dashboardType, confirmedTimeRange) : null
+  const data = rawData ? transformApiData(rawData, selectedEmployees, dashboardType, confirmedTimeRange) : null
   const secondaryData = rawData ? transformApiData(
     {
       settersCalls: rawData.secondarySettersCalls || [],
@@ -495,7 +607,7 @@ export function DashboardContent() {
       confirmersScorecards: rawData.secondaryConfirmersScorecards || [],
       stl: [], // STL is team-wide, not needed for secondary metrics
     },
-    selectedEmployee,
+    selectedEmployees,
     dashboardType,
     secondaryConfirmedTimeRange
   ) : null
@@ -513,15 +625,15 @@ export function DashboardContent() {
     return Array.from(uniqueEmployees).sort()
   })() : []
 
-  // Auto-reset employee filter if selected employee doesn't exist in current data
+  // Auto-reset employee filter if selected employees don't exist in current data
   useEffect(() => {
-    if (selectedEmployee !== 'all' && availableEmployees.length > 0) {
-      const employeeExists = availableEmployees.includes(selectedEmployee)
-      if (!employeeExists) {
-        setSelectedEmployee('all')
+    if (selectedEmployees.length > 0 && availableEmployees.length > 0) {
+      const validEmployees = selectedEmployees.filter(emp => availableEmployees.includes(emp))
+      if (validEmployees.length !== selectedEmployees.length) {
+        setSelectedEmployees(validEmployees)
       }
     }
-  }, [rawData, selectedEmployee, dashboardType, availableEmployees])
+  }, [rawData, selectedEmployees, dashboardType, availableEmployees])
 
   // Clear custom dates when switching away from "Custom Dates" option
   useEffect(() => {
@@ -542,6 +654,37 @@ export function DashboardContent() {
       setSecondaryConfirmedTimeRange({ startHour: undefined, endHour: undefined })
     }
   }, [secondaryTimePeriod])
+
+  // Save filters to localStorage when they change (debounced)
+  useEffect(() => {
+    if (!filtersLoaded) return // Don't save until initial load is complete
+
+    const timeoutId = setTimeout(() => {
+      const serialized = serializeFilterState(
+        selectedEmployees,
+        timePeriod,
+        dashboardType,
+        confirmedDateRange,
+        confirmedTimeRange,
+        secondaryTimePeriod,
+        secondaryConfirmedDateRange,
+        secondaryConfirmedTimeRange
+      )
+      FilterStorage.saveFilters(serialized)
+    }, 500) // Debounce by 500ms
+
+    return () => clearTimeout(timeoutId)
+  }, [
+    filtersLoaded,
+    selectedEmployees,
+    timePeriod,
+    dashboardType,
+    confirmedDateRange,
+    confirmedTimeRange,
+    secondaryTimePeriod,
+    secondaryConfirmedDateRange,
+    secondaryConfirmedTimeRange,
+  ])
 
   const handleDateRangeOk = () => {
     if (customDateRange.from && customDateRange.to) {
@@ -862,19 +1005,67 @@ export function DashboardContent() {
                   </PopoverContent>
                 </Popover>
               )}
-              <Select value={selectedEmployee} onValueChange={setSelectedEmployee}>
-                <SelectTrigger className="h-9 dark:border-white/10 bg-white dark:bg-transparent w-[140px]">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">All Employees</SelectItem>
-                  {availableEmployees.map((employeeName: string) => (
-                    <SelectItem key={employeeName} value={employeeName}>
-                      {employeeName}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+              <Popover open={employeeSelectOpen} onOpenChange={setEmployeeSelectOpen}>
+                <PopoverTrigger asChild>
+                  <Button variant="outline" className="h-9 dark:border-white/10 bg-white dark:bg-transparent w-[140px] justify-between font-normal">
+                    <span className="truncate text-left flex-1">{formatEmployeeSelectionText(selectedEmployees)}</span>
+                    <ChevronDown className="h-4 w-4 opacity-50 shrink-0" />
+                  </Button>
+                </PopoverTrigger>
+                <PopoverContent className="w-[200px] p-0" align="start">
+                  <div className="p-2">
+                    <div className="flex items-center space-x-2 p-2 hover:bg-accent rounded-sm">
+                      <Checkbox
+                        checked={selectedEmployees.length === 0}
+                        onCheckedChange={(checked) => {
+                          if (checked) {
+                            setSelectedEmployees([])
+                            setEmployeeSelectOpen(false)
+                          }
+                        }}
+                      />
+                      <label 
+                        className="text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70 cursor-pointer flex-1"
+                        onClick={() => {
+                          setSelectedEmployees([])
+                          setEmployeeSelectOpen(false)
+                        }}
+                      >
+                        All Employees
+                      </label>
+                    </div>
+                    {availableEmployees.map((employeeName: string) => (
+                      <div
+                        key={employeeName}
+                        className="flex items-center space-x-2 p-2 hover:bg-accent rounded-sm"
+                      >
+                        <Checkbox
+                          checked={selectedEmployees.includes(employeeName)}
+                          onCheckedChange={(checked) => {
+                            if (checked) {
+                              setSelectedEmployees([...selectedEmployees, employeeName])
+                            } else {
+                              setSelectedEmployees(selectedEmployees.filter(emp => emp !== employeeName))
+                            }
+                          }}
+                        />
+                        <label 
+                          className="text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70 cursor-pointer flex-1"
+                          onClick={() => {
+                            if (selectedEmployees.includes(employeeName)) {
+                              setSelectedEmployees(selectedEmployees.filter(emp => emp !== employeeName))
+                            } else {
+                              setSelectedEmployees([...selectedEmployees, employeeName])
+                            }
+                          }}
+                        >
+                          {employeeName}
+                        </label>
+                      </div>
+                    ))}
+                  </div>
+                </PopoverContent>
+              </Popover>
             </div>
             {timePeriod === "Custom Dates" && (
                 <Popover open={mobilePickerOpen} onOpenChange={setMobilePickerOpen}>

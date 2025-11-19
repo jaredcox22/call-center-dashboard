@@ -1,5 +1,6 @@
 import { useEffect } from 'react'
 import { SessionManager } from '@/lib/session-manager'
+import { FilterStorage } from '@/lib/filter-storage'
 import { useAuth } from '@/contexts/auth-context'
 
 export function useActivityTracker() {
@@ -10,6 +11,7 @@ export function useActivityTracker() {
 
     // Update activity on mount
     SessionManager.updateActivity()
+    FilterStorage.updateActivity()
 
     // Check for expiration on visibility change
     const handleVisibilityChange = () => {
@@ -18,6 +20,7 @@ export function useActivityTracker() {
           logout()
         } else {
           SessionManager.updateActivity()
+          FilterStorage.updateActivity()
         }
       }
     }
@@ -25,6 +28,7 @@ export function useActivityTracker() {
     // Update activity on user interaction
     const updateActivity = () => {
       SessionManager.updateActivity()
+      FilterStorage.updateActivity()
     }
 
     // Listen to various user activity events
