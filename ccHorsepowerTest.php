@@ -659,17 +659,17 @@ if ($_SERVER['REQUEST_METHOD'] == 'OPTIONS') {
                 (
                     SELECT
                         MAX(id) as id,
-                        lds_id,
+                        cst_id,
                         MIN(CallDate) as CallDate
                     FROM
                         cls_Calls
                     WHERE
                         ResultCode NOT IN ('*ND', 'ccND', 'NDDNC', 'NDLB', 'NDTR')
                     GROUP BY
-                        lds_id
+                        cst_id
                 ) as cRef
                 ON
-                    lds_Leads.id = cRef.lds_id
+                    lds_Leads.cst_id = cRef.cst_id
                 LEFT JOIN
                     cls_Calls
                 ON
@@ -872,22 +872,7 @@ if ($_SERVER['REQUEST_METHOD'] == 'OPTIONS') {
 				$startDOW = date('w', strtotime($startDate));         
 			}
 			if(array_key_exists($endDOW, $ccHours)){
-				$endBusinessStart = strtotime("$endDate " . $ccHours[$endDOW]['start']);
-				$endBusinessEnd = strtotime("$endDate " . $ccHours[$endDOW]['end']);
-				$endTime = strtotime($end);
-				
-				// If call is before business hours start, count as 0 seconds
-				if($endTime < $endBusinessStart){
-					// Don't add anything (0 seconds)
-				}
-				// If call is after business hours end, cap at end of business hours
-				else if($endTime > $endBusinessEnd){
-					$difference += $endBusinessEnd - $endBusinessStart;
-				}
-				// Normal case: call is within business hours
-				else{
-					$difference += $endTime - $endBusinessStart;
-				}
+				$difference += strtotime($end) - strtotime("$endDate " . $ccHours[$endDOW]['start']);
 			}
 		}
 		if($difference < 0){
