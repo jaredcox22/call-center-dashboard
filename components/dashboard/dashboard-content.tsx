@@ -405,6 +405,10 @@ const transformApiData = (
   const totalQualified = filteredCalls.filter((c: any) => c.qualified === true).length
   const totalUnqualified = filteredCalls.filter((c: any) => c.qualified === false && c.positive === 1).length
   
+  // Calculate totalApptSet and totalIssued (count calls where ApptSet > 0 and Issued > 0)
+  const totalApptSet = filteredCalls.filter((c: any) => c.ApptSet != null && c.ApptSet > 0).length
+  const totalIssued = filteredCalls.filter((c: any) => c.Issued != null && c.Issued > 0).length
+  
   // Calculate total hours (using adjusted hours if time range is provided)
   const totalHours = Array.from(hoursByEmployee.values()).reduce((sum: number, hours: number) => sum + hours, 0)
   
@@ -422,7 +426,7 @@ const transformApiData = (
   const conversionRate = totalPitched > 0 ? Math.round((totalPositive / totalPitched) * 100) : 0
   const conversionQualified = totalPitched > 0 ? Math.round((totalQualified / totalPitched) * 100) : 0
   const conversionUnqualified = totalPitched > 0 ? Math.round((totalUnqualified / totalPitched) * 100) : 0
-  const grossIssue = totalCalls > 0 ? Math.round((totalPositive / totalCalls) * 100) : 0
+  const grossIssue = totalApptSet > 0 ? Math.round((totalIssued / totalApptSet) * 100) : 0
   
   // Calculate scorecard percentage: sum of actualTotals / sum of maxTotals * 100
   let scoreCard = 0
@@ -1661,7 +1665,7 @@ export function DashboardContent() {
                           { label: "Excellent", min: 81, max: 84, color: "#22c55e" },
                           { label: "Elite", min: 85, color: "#3b82f6" },
                         ]}
-                        formula="(Total Positive ÷ Total Calls) × 100"
+                        formula="(Total Issued ÷ Total ApptSet) × 100"
                       />
                     </div>
                   </>
