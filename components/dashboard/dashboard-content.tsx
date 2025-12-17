@@ -409,8 +409,15 @@ const transformApiData = (
   const totalConnected = filteredCalls.filter((c: any) => c.connected === 1).length
   const totalPitched = filteredCalls.filter((c: any) => c.pitched === 1).length
   const totalPositive = filteredCalls.filter((c: any) => c.positive === 1).length
-  const totalQualified = filteredCalls.filter((c: any) => c.qualified === true).length
-  const totalUnqualified = filteredCalls.filter((c: any) => c.qualified === false && c.positive === 1).length
+  
+  // Filter to only pitched calls for qualified/unqualified calculations
+  const pitchedCalls = filteredCalls.filter((c: any) => c.pitched === 1)
+  const totalQualified = pitchedCalls.filter((c: any) => c.qualified === true).length
+  const totalUnqualified = pitchedCalls.filter((c: any) => c.qualified === false).length
+  
+  // Calculate qualified and unqualified conversions (from pitched calls)
+  const totalQualifiedConversions = pitchedCalls.filter((c: any) => c.qualified === true && c.positive === 1).length
+  const totalUnqualifiedConversions = pitchedCalls.filter((c: any) => c.qualified === false && c.positive === 1).length
   
   // Calculate totalApptSet and totalIssued (count calls where ApptSet > 0 and Issued > 0)
   const totalApptSet = filteredCalls.filter((c: any) => c.ApptSet != null && c.ApptSet > 0).length
@@ -431,8 +438,8 @@ const transformApiData = (
   const connectionRate = totalCalls > 0 ? Math.round((totalConnected / totalCalls) * 100) : 0
   const pitchRate = totalConnected > 0 ? Math.round((totalPitched / totalConnected) * 100) : 0
   const conversionRate = totalPitched > 0 ? Math.round((totalPositive / totalPitched) * 100) : 0
-  const conversionQualified = totalPitched > 0 ? Math.round((totalQualified / totalPitched) * 100) : 0
-  const conversionUnqualified = totalPitched > 0 ? Math.round((totalUnqualified / totalPitched) * 100) : 0
+  const conversionQualified = totalQualified > 0 ? Math.round((totalQualifiedConversions / totalQualified) * 100) : 0
+  const conversionUnqualified = totalUnqualified > 0 ? Math.round((totalUnqualifiedConversions / totalUnqualified) * 100) : 0
   const grossIssue = totalApptSet > 0 ? Math.round((totalIssued / totalApptSet) * 100) : 0
   
   // Calculate scorecard percentage: sum of actualTotals / sum of maxTotals * 100

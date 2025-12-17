@@ -61,9 +61,9 @@ export function ConversionUnqualifiedDataTable({ data, open, onOpenChange }: Con
   const [sortDirection, setSortDirection] = useState<SortDirection>("desc")
   const [isInfoOpen, setIsInfoOpen] = useState(false)
 
-  // Filter to only unqualified conversions (qualified === false AND positive === 1)
+  // Filter to all unqualified calls (qualified === false)
   const unqualifiedData = useMemo(() => {
-    return data.filter((record) => record.qualified === false && record.positive === 1)
+    return data.filter((record) => record.qualified === false)
   }, [data])
 
   // Calculate summary stats
@@ -71,7 +71,7 @@ export function ConversionUnqualifiedDataTable({ data, open, onOpenChange }: Con
     const totalPitches = data.length // Total pitched calls
     const totalUnqualified = unqualifiedData.length
     const totalConversions = unqualifiedData.filter((record) => record.positive === 1).length
-    const conversionRate = totalPitches > 0 ? Math.round((totalConversions / totalPitches) * 100) : 0
+    const conversionRate = totalUnqualified > 0 ? Math.round((totalConversions / totalUnqualified) * 100) : 0
     
     return {
       totalPitches,
@@ -203,8 +203,8 @@ export function ConversionUnqualifiedDataTable({ data, open, onOpenChange }: Con
                   <AlertDescription>
                     <div className="space-y-2 pt-2">
                       <p>
-                        <strong>What's included:</strong> This table shows all calls where a pitch was made (pitched = 1), the conversion was unqualified (qualified = false), and positive = 1 within the selected date range and filters. 
-                        The conversion rate is calculated as: (Total Unqualified Conversions ÷ Total Pitches) × 100.
+                        <strong>What's included:</strong> This table shows all calls where a pitch was made (pitched = 1) and the conversion was unqualified (qualified = false) within the selected date range and filters. 
+                        The conversion rate is calculated as: (Total Unqualified Conversions ÷ Total Unqualified Calls) × 100.
                       </p>
                       <p>
                         <strong>Unqualified Conversion:</strong> An unqualified conversion is a call where qualified = false and positive = 1. This indicates that a conversion occurred but did not meet the qualification criteria.

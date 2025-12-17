@@ -71,7 +71,7 @@ export function ConversionQualifiedDataTable({ data, open, onOpenChange }: Conve
     const totalPitches = data.length // Total pitched calls
     const totalQualified = qualifiedData.length
     const totalConversions = qualifiedData.filter((record) => record.positive === 1).length
-    const conversionRate = totalPitches > 0 ? Math.round((totalConversions / totalPitches) * 100) : 0
+    const conversionRate = totalQualified > 0 ? Math.round((totalConversions / totalQualified) * 100) : 0
     
     return {
       totalPitches,
@@ -204,7 +204,7 @@ export function ConversionQualifiedDataTable({ data, open, onOpenChange }: Conve
                     <div className="space-y-2 pt-2">
                       <p>
                         <strong>What's included:</strong> This table shows all calls where a pitch was made (pitched = 1) and the conversion was qualified (qualified = true) within the selected date range and filters. 
-                        The conversion rate is calculated as: (Total Qualified Conversions ÷ Total Pitches) × 100.
+                        The conversion rate is calculated as: (Total Qualified Conversions ÷ Total Qualified Calls) × 100.
                       </p>
                       <p>
                         <strong>Qualified Conversion:</strong> A qualified conversion is a call where qualified = true. This indicates that the conversion met the qualification criteria.
