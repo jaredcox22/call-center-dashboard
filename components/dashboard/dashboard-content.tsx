@@ -485,6 +485,28 @@ const transformApiData = (
   // Check if there's confirmers data (only relevant when on confirmers dashboard)
   const hasConfirmersData = dashboardType === 'confirmers' && (totalCalls > 0 || filteredScorecards.length > 0)
   
+  // Calculate confirmers-specific metrics
+  // Contact Rate: percentage of calls that were connected
+  const contactRate = hasConfirmersData && totalCalls > 0 
+    ? Math.round((totalConnected / totalCalls) * 100) 
+    : 0
+  
+  // Gross Issue Rate: percentage of appointments set that resulted in issues
+  const grossIssueRate = hasConfirmersData && totalApptSet > 0
+    ? Math.round((totalIssued / totalApptSet) * 100)
+    : 0
+  
+  // Net Issue Rate: percentage of connected calls that resulted in issues
+  const netIssueRate = hasConfirmersData && totalConnected > 0
+    ? Math.round((totalIssued / totalConnected) * 100)
+    : 0
+  
+  // 1-Leg Rate: percentage of calls that resulted in a pitch (successful contact and pitch)
+  // This represents the percentage of all calls that achieved both connection and pitch
+  const oneLegsRate = hasConfirmersData && totalCalls > 0
+    ? Math.round((totalPitched / totalCalls) * 100)
+    : 0
+  
   return {
     employees: Array.from(employees.entries()).map(([name, stats], index) => ({
       id: String(index + 1),
@@ -510,12 +532,11 @@ const transformApiData = (
       checkoutToDialTime: Math.round(avgStl),
     },
     confirmersMetrics: {
-      // Return 0 if no confirmers data (calls or scorecards)
-      // Only show metrics when on confirmers dashboard AND there's actual data
-      contactRate: hasConfirmersData ? Math.floor(Math.random() * 25) + 40 : 0,
-      grossIssueRate: hasConfirmersData ? Math.floor(Math.random() * 20) + 30 : 0,
-      netIssueRate: hasConfirmersData ? Math.floor(Math.random() * 20) + 25 : 0,
-      oneLegsRate: hasConfirmersData ? Math.floor(Math.random() * 15) + 15 : 0,
+      // Calculate from actual confirmersCalls data, respecting date and employee filters
+      contactRate,
+      grossIssueRate,
+      netIssueRate,
+      oneLegsRate,
       scorecard: (dashboardType === 'confirmers') ? scoreCard : 0, // Use scorecard calculation for confirmers only
     },
   }
