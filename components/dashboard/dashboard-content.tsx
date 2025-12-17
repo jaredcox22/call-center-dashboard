@@ -17,6 +17,9 @@ import { ConversionDataTable } from "./conversion-data-table"
 import { PitchDataTable } from "./pitch-data-table"
 import { ConnectionDataTable } from "./connection-data-table"
 import { DialsPerHourDataTable } from "./dials-per-hour-data-table"
+import { ConversionQualifiedDataTable } from "./conversion-qualified-data-table"
+import { ConversionUnqualifiedDataTable } from "./conversion-unqualified-data-table"
+import { GrossIssueDataTable } from "./gross-issue-data-table"
 import { LogOut, RefreshCw, Moon, Sun, Menu, CalendarIcon, AlertCircle, Users, ChevronDown } from "lucide-react"
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetTrigger } from "@/components/ui/sheet"
 import {
@@ -535,6 +538,9 @@ export function DashboardContent() {
   const [pitchTableOpen, setPitchTableOpen] = useState(false)
   const [connectionTableOpen, setConnectionTableOpen] = useState(false)
   const [dialsPerHourTableOpen, setDialsPerHourTableOpen] = useState(false)
+  const [conversionQualifiedTableOpen, setConversionQualifiedTableOpen] = useState(false)
+  const [conversionUnqualifiedTableOpen, setConversionUnqualifiedTableOpen] = useState(false)
+  const [grossIssueTableOpen, setGrossIssueTableOpen] = useState(false)
   
   // Time range state for primary date range
   const [customTimeRange, setCustomTimeRange] = useState<{ startHour: number | undefined; endHour: number | undefined }>({
@@ -790,6 +796,27 @@ export function DashboardContent() {
     return filteredCalls
   }
 
+  // Helper function to filter calls by secondary time range and employees (for performance metrics)
+  const getFilteredSecondaryCalls = (calls: any[]) => {
+    // Filter by time range if provided (only when using Custom Dates)
+    let timeFilteredCalls = calls
+    if (secondaryTimePeriod === 'Custom Dates' && secondaryConfirmedTimeRange && (secondaryConfirmedTimeRange.startHour !== undefined || secondaryConfirmedTimeRange.endHour !== undefined)) {
+      timeFilteredCalls = calls.filter((call: any) => {
+        if (!call.date) return false
+        const hour = extractHourFromDateString(call.date)
+        return isHourInTimeRange(hour, secondaryConfirmedTimeRange.startHour, secondaryConfirmedTimeRange.endHour)
+      })
+    }
+    
+    // Filter by employee if employees are selected
+    let filteredCalls = timeFilteredCalls
+    if (selectedEmployees.length > 0) {
+      filteredCalls = timeFilteredCalls.filter((call: any) => selectedEmployees.includes(call.employee))
+    }
+    
+    return filteredCalls
+  }
+
   // Filter all calls for connection and dials per hour data tables
   const filteredAllCalls = rawData ? (() => {
     if (dashboardType !== 'setters') return []
@@ -842,6 +869,70 @@ export function DashboardContent() {
     }))
   })() : []
 
+  // Filter calls for gross issue data table (calls where ApptSet > 0)
+  const filteredGrossIssueCalls = rawData ? (() => {
+    if (dashboardType !== 'setters') return []
+    
+    const callsKey = 'settersCalls'
+    const allCalls = rawData[callsKey] || []
+    const filteredCalls = getFilteredCalls(allCalls)
+    
+    // Filter to only calls where ApptSet > 0
+    const apptSetCalls = filteredCalls.filter((call: any) => call.ApptSet != null && call.ApptSet > 0)
+    
+    // Transform to GrossIssueDataTable format
+    return apptSetCalls.map((call: any) => ({
+      employee: call.employee || '',
+      date: call.date || null,
+      ApptSet: call.ApptSet ?? null,
+      Issued: call.Issued ?? null,
+      id: call.id ?? null,
+    }))
+  })() : []
+
+  // Filter pitched calls for performance metrics tables (using secondary date range)
+  const filteredSecondaryPitchedCalls = rawData ? (() => {
+    if (dashboardType !== 'setters') return []
+    
+    const callsKey = 'secondarySettersCalls'
+    const allCalls = rawData[callsKey] || []
+    const filteredCalls = getFilteredSecondaryCalls(allCalls)
+    
+    // Filter to only pitched calls (pitched === 1)
+    const pitchedCalls = filteredCalls.filter((call: any) => call.pitched === 1)
+    
+    // Transform to ConversionDataTable format
+    return pitchedCalls.map((call: any) => ({
+      employee: call.employee || '',
+      date: call.date || null,
+      pitched: call.pitched || 0,
+      positive: call.positive || 0,
+      qualified: call.qualified ?? null,
+      id: call.id ?? null,
+    }))
+  })() : []
+
+  // Filter calls for gross issue data table using secondary date range
+  const filteredSecondaryGrossIssueCalls = rawData ? (() => {
+    if (dashboardType !== 'setters') return []
+    
+    const callsKey = 'secondarySettersCalls'
+    const allCalls = rawData[callsKey] || []
+    const filteredCalls = getFilteredSecondaryCalls(allCalls)
+    
+    // Filter to only calls where ApptSet > 0
+    const apptSetCalls = filteredCalls.filter((call: any) => call.ApptSet != null && call.ApptSet > 0)
+    
+    // Transform to GrossIssueDataTable format
+    return apptSetCalls.map((call: any) => ({
+      employee: call.employee || '',
+      date: call.date || null,
+      ApptSet: call.ApptSet ?? null,
+      Issued: call.Issued ?? null,
+      id: call.id ?? null,
+    }))
+  })() : []
+
   // Transform all calls for connection and dials per hour data tables
   const connectionTableData = filteredAllCalls.map((call: any) => ({
     employee: call.employee || '',
@@ -855,6 +946,37 @@ export function DashboardContent() {
     date: call.date || null,
     id: call.id ?? null,
   }))
+
+  // Calculate total hours for dials per hour metric (same logic as in transformApiData)
+  const totalHoursForDialsPerHour = rawData ? (() => {
+    if (dashboardType !== 'setters') return 0
+    
+    let filteredHours = rawData.hours || []
+    
+    // Filter by employee if employees are selected
+    if (selectedEmployees.length > 0) {
+      filteredHours = filteredHours.filter((h: any) => selectedEmployees.includes(h.employee))
+    }
+    
+    // Create a map of hours by employee name
+    const hoursByEmployee = new Map<string, number>()
+    filteredHours.forEach((h: any) => {
+      if (h.employee) {
+        let adjustedHours = h.hours || 0
+        
+        // Adjust hours based on time range if provided (only when using Custom Dates)
+        if (timePeriod === 'Custom Dates' && confirmedTimeRange && (confirmedTimeRange.startHour !== undefined || confirmedTimeRange.endHour !== undefined)) {
+          const hoursInRange = calculateHoursInTimeRange(confirmedTimeRange.startHour, confirmedTimeRange.endHour)
+          adjustedHours = hoursInRange
+        }
+        
+        hoursByEmployee.set(h.employee, adjustedHours)
+      }
+    })
+    
+    // Calculate total hours
+    return Array.from(hoursByEmployee.values()).reduce((sum: number, hours: number) => sum + hours, 0)
+  })() : 0
 
   if (error) {
     return (
@@ -1735,6 +1857,8 @@ export function DashboardContent() {
                           { label: "Elite", min: 95, max: 100, color: "#3b82f6" },
                         ]}
                         formula="(Total Qualified ÷ Total Pitched) × 100"
+                        showDataIcon={true}
+                        onViewData={() => setConversionQualifiedTableOpen(true)}
                       />
                       <CircularGauge
                         title="Conversion % (Un-Qualified)"
@@ -1752,6 +1876,8 @@ export function DashboardContent() {
                           { label: "Elite", min: 40, max: 100, color: "#3b82f6" },
                         ]}
                         formula="(Total Unqualified ÷ Total Pitched) × 100"
+                        showDataIcon={true}
+                        onViewData={() => setConversionUnqualifiedTableOpen(true)}
                       />
                       <CircularGauge
                         title="Gross Issue"
@@ -1769,6 +1895,8 @@ export function DashboardContent() {
                           { label: "Elite", min: 85, color: "#3b82f6" },
                         ]}
                         formula="(Total Issued ÷ Total ApptSet) × 100"
+                        showDataIcon={true}
+                        onViewData={() => setGrossIssueTableOpen(true)}
                       />
                     </div>
                   </>
@@ -1944,8 +2072,24 @@ export function DashboardContent() {
           />
           <DialsPerHourDataTable
             data={dialsPerHourTableData}
+            totalHours={totalHoursForDialsPerHour}
             open={dialsPerHourTableOpen}
             onOpenChange={setDialsPerHourTableOpen}
+          />
+          <ConversionQualifiedDataTable
+            data={filteredSecondaryPitchedCalls}
+            open={conversionQualifiedTableOpen}
+            onOpenChange={setConversionQualifiedTableOpen}
+          />
+          <ConversionUnqualifiedDataTable
+            data={filteredSecondaryPitchedCalls}
+            open={conversionUnqualifiedTableOpen}
+            onOpenChange={setConversionUnqualifiedTableOpen}
+          />
+          <GrossIssueDataTable
+            data={filteredSecondaryGrossIssueCalls}
+            open={grossIssueTableOpen}
+            onOpenChange={setGrossIssueTableOpen}
           />
         </>
       )}

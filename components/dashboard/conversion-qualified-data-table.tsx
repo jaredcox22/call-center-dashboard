@@ -37,46 +37,59 @@ const formatDate = (dateString: string | null | undefined): string => {
   }
 }
 
-interface DialsPerHourRecord {
+interface ConversionQualifiedRecord {
   employee: string
   date: string | null
+  pitched: number
+  positive: number
+  qualified: boolean | null
   id?: number | null
 }
 
-interface DialsPerHourDataTableProps {
-  data: DialsPerHourRecord[]
-  totalHours: number
+interface ConversionQualifiedDataTableProps {
+  data: ConversionQualifiedRecord[]
   open: boolean
   onOpenChange: (open: boolean) => void
 }
 
-type SortField = "employee" | "date" | "id"
+type SortField = "employee" | "date" | "positive" | "qualified" | "id"
 type SortDirection = "asc" | "desc" | null
 
-export function DialsPerHourDataTable({ data, totalHours, open, onOpenChange }: DialsPerHourDataTableProps) {
+export function ConversionQualifiedDataTable({ data, open, onOpenChange }: ConversionQualifiedDataTableProps) {
   const [searchQuery, setSearchQuery] = useState("")
   const [sortField, setSortField] = useState<SortField>("date")
   const [sortDirection, setSortDirection] = useState<SortDirection>("desc")
   const [isInfoOpen, setIsInfoOpen] = useState(false)
 
+  // Filter to only qualified conversions (qualified === true)
+  const qualifiedData = useMemo(() => {
+    return data.filter((record) => record.qualified === true)
+  }, [data])
+
   // Calculate summary stats
   const summaryStats = useMemo(() => {
-    const totalDials = data.length
+    const totalPitches = data.length // Total pitched calls
+    const totalQualified = qualifiedData.length
+    const totalConversions = qualifiedData.filter((record) => record.positive === 1).length
+    const conversionRate = totalPitches > 0 ? Math.round((totalConversions / totalPitches) * 100) : 0
     
     return {
-      totalDials,
-      totalHours,
+      totalPitches,
+      totalQualified,
+      totalConversions,
+      conversionRate,
     }
-  }, [data, totalHours])
+  }, [data, qualifiedData])
 
   // Filter and sort data
   const filteredAndSortedData = useMemo(() => {
-    let filtered = data.filter((record) => {
+    let filtered = qualifiedData.filter((record) => {
       const query = searchQuery.toLowerCase()
       return (
         (record.employee?.toLowerCase() ?? "").includes(query) ||
         (record.id?.toString() ?? "").includes(query) ||
-        formatDate(record.date).toLowerCase().includes(query)
+        formatDate(record.date).toLowerCase().includes(query) ||
+        (record.positive === 1 ? "yes" : "no").includes(query)
       )
     })
 
@@ -109,7 +122,7 @@ export function DialsPerHourDataTable({ data, totalHours, open, onOpenChange }: 
     }
 
     return filtered
-  }, [data, searchQuery, sortField, sortDirection])
+  }, [qualifiedData, searchQuery, sortField, sortDirection])
 
   const handleSort = (field: SortField) => {
     if (sortField === field) {
@@ -142,22 +155,30 @@ export function DialsPerHourDataTable({ data, totalHours, open, onOpenChange }: 
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-[95vw] lg:max-w-7xl max-h-[90vh] overflow-hidden flex flex-col p-0 gap-0">
         <DialogHeader className="px-6 pt-6 pb-4">
-          <DialogTitle>Dials Per Hour - Data Table</DialogTitle>
+          <DialogTitle>Conversion % (Qualified) - Data Table</DialogTitle>
           <DialogDescription>
-            View and search all dials. Click column headers to sort.
+            View and search all qualified pitched calls with their conversion status. Click column headers to sort.
           </DialogDescription>
         </DialogHeader>
 
         <div className="flex flex-col gap-4 flex-1 min-h-0 px-6 pb-6">
           {/* Summary Stats */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
             <Card className="p-3">
-              <div className="text-xs text-muted-foreground mb-1">Total Dials</div>
-              <div className="text-lg font-semibold">{summaryStats.totalDials}</div>
+              <div className="text-xs text-muted-foreground mb-1">Total Pitches</div>
+              <div className="text-lg font-semibold">{summaryStats.totalPitches}</div>
             </Card>
             <Card className="p-3">
-              <div className="text-xs text-muted-foreground mb-1">Total Hours</div>
-              <div className="text-lg font-semibold">{summaryStats.totalHours.toFixed(1)}</div>
+              <div className="text-xs text-muted-foreground mb-1">Total Qualified</div>
+              <div className="text-lg font-semibold">{summaryStats.totalQualified}</div>
+            </Card>
+            <Card className="p-3">
+              <div className="text-xs text-muted-foreground mb-1">Conversions</div>
+              <div className="text-lg font-semibold text-green-600 dark:text-green-400">{summaryStats.totalConversions}</div>
+            </Card>
+            <Card className="p-3">
+              <div className="text-xs text-muted-foreground mb-1">Conversion Rate</div>
+              <div className="text-lg font-semibold">{summaryStats.conversionRate}%</div>
             </Card>
           </div>
 
@@ -182,11 +203,11 @@ export function DialsPerHourDataTable({ data, totalHours, open, onOpenChange }: 
                   <AlertDescription>
                     <div className="space-y-2 pt-2">
                       <p>
-                        <strong>What's included:</strong> This table shows all dials (calls) within the selected date range and filters. 
-                        Dials per hour is calculated as: Total Dials ÷ Total Hours.
+                        <strong>What's included:</strong> This table shows all calls where a pitch was made (pitched = 1) and the conversion was qualified (qualified = true) within the selected date range and filters. 
+                        The conversion rate is calculated as: (Total Qualified Conversions ÷ Total Pitches) × 100.
                       </p>
                       <p>
-                        <strong>Note:</strong> The dials per hour metric is calculated based on the total number of dials and total hours worked across all selected employees and time period.
+                        <strong>Qualified Conversion:</strong> A qualified conversion is a call where qualified = true. This indicates that the conversion met the qualification criteria.
                       </p>
                     </div>
                   </AlertDescription>
@@ -198,13 +219,13 @@ export function DialsPerHourDataTable({ data, totalHours, open, onOpenChange }: 
           {/* Search Input */}
           <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
             <Input
-              placeholder="Search by employee, date, or call ID..."
+              placeholder="Search by employee, date, call ID, or conversion status..."
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
               className="w-full"
             />
             <div className="text-sm text-muted-foreground whitespace-nowrap text-center sm:text-left">
-              {filteredAndSortedData.length} of {data.length} records
+              {filteredAndSortedData.length} of {qualifiedData.length} records
             </div>
           </div>
 
@@ -235,6 +256,17 @@ export function DialsPerHourDataTable({ data, totalHours, open, onOpenChange }: 
                       {getSortIcon("date")}
                     </Button>
                   </TableHead>
+                  <TableHead className="w-[100px]">
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="h-8 -ml-2"
+                      onClick={() => handleSort("positive")}
+                    >
+                      Conversion
+                      {getSortIcon("positive")}
+                    </Button>
+                  </TableHead>
                   <TableHead className="w-[100px] hidden sm:table-cell">
                     <Button
                       variant="ghost"
@@ -251,18 +283,25 @@ export function DialsPerHourDataTable({ data, totalHours, open, onOpenChange }: 
               <TableBody>
                 {filteredAndSortedData.length === 0 ? (
                   <TableRow>
-                    <TableCell colSpan={3} className="text-center py-8 text-muted-foreground">
+                    <TableCell colSpan={4} className="text-center py-8 text-muted-foreground">
                       {searchQuery ? "No records found matching your search." : "No data available."}
                     </TableCell>
                   </TableRow>
                 ) : (
-                  filteredAndSortedData.map((record) => (
-                    <TableRow key={record.id ? `dials-${record.id}` : `dials-${record.employee}-${record.date}`}>
+                  filteredAndSortedData.map((record, index) => (
+                    <TableRow key={`qualified-${record.employee}-${record.date}-${index}`}>
                       <TableCell className="min-w-[120px] font-medium">
                         {record.employee || "N/A"}
                       </TableCell>
                       <TableCell className="text-sm text-muted-foreground min-w-[160px]">
                         {formatDate(record.date)}
+                      </TableCell>
+                      <TableCell className="font-medium">
+                        {record.positive === 1 ? (
+                          <span className="text-green-600 dark:text-green-400">Yes</span>
+                        ) : (
+                          <span className="text-muted-foreground">No</span>
+                        )}
                       </TableCell>
                       <TableCell className="text-sm text-muted-foreground hidden sm:table-cell">
                         {record.id ?? "N/A"}
