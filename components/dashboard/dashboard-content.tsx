@@ -14,6 +14,9 @@ import { EmployeeIndicator } from "./employee-indicator"
 import { FeaturedMetricCard } from "./featured-metric-card"
 import { STLDataTable } from "./stl-data-table"
 import { ConversionDataTable } from "./conversion-data-table"
+import { PitchDataTable } from "./pitch-data-table"
+import { ConnectionDataTable } from "./connection-data-table"
+import { DialsPerHourDataTable } from "./dials-per-hour-data-table"
 import { LogOut, RefreshCw, Moon, Sun, Menu, CalendarIcon, AlertCircle, Users, ChevronDown } from "lucide-react"
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetTrigger } from "@/components/ui/sheet"
 import {
@@ -529,6 +532,9 @@ export function DashboardContent() {
   const [mobilePickerOpen, setMobilePickerOpen] = useState(false)
   const [stlTableOpen, setStlTableOpen] = useState(false)
   const [conversionTableOpen, setConversionTableOpen] = useState(false)
+  const [pitchTableOpen, setPitchTableOpen] = useState(false)
+  const [connectionTableOpen, setConnectionTableOpen] = useState(false)
+  const [dialsPerHourTableOpen, setDialsPerHourTableOpen] = useState(false)
   
   // Time range state for primary date range
   const [customTimeRange, setCustomTimeRange] = useState<{ startHour: number | undefined; endHour: number | undefined }>({
@@ -763,17 +769,12 @@ export function DashboardContent() {
     return rawData.stl
   })() : []
 
-  // Filter pitched calls for conversion data table
-  const filteredPitchedCalls = rawData ? (() => {
-    if (dashboardType !== 'setters') return []
-    
-    const callsKey = 'settersCalls'
-    const allCalls = rawData[callsKey] || []
-    
+  // Helper function to filter calls by time range and employees
+  const getFilteredCalls = (calls: any[]) => {
     // Filter by time range if provided (only when using Custom Dates)
-    let timeFilteredCalls = allCalls
+    let timeFilteredCalls = calls
     if (timePeriod === 'Custom Dates' && confirmedTimeRange && (confirmedTimeRange.startHour !== undefined || confirmedTimeRange.endHour !== undefined)) {
-      timeFilteredCalls = allCalls.filter((call: any) => {
+      timeFilteredCalls = calls.filter((call: any) => {
         if (!call.date) return false
         const hour = extractHourFromDateString(call.date)
         return isHourInTimeRange(hour, confirmedTimeRange.startHour, confirmedTimeRange.endHour)
@@ -785,6 +786,47 @@ export function DashboardContent() {
     if (selectedEmployees.length > 0) {
       filteredCalls = timeFilteredCalls.filter((call: any) => selectedEmployees.includes(call.employee))
     }
+    
+    return filteredCalls
+  }
+
+  // Filter all calls for connection and dials per hour data tables
+  const filteredAllCalls = rawData ? (() => {
+    if (dashboardType !== 'setters') return []
+    
+    const callsKey = 'settersCalls'
+    const allCalls = rawData[callsKey] || []
+    return getFilteredCalls(allCalls)
+  })() : []
+
+  // Filter connected calls for pitch data table
+  const filteredConnectedCalls = rawData ? (() => {
+    if (dashboardType !== 'setters') return []
+    
+    const callsKey = 'settersCalls'
+    const allCalls = rawData[callsKey] || []
+    const filteredCalls = getFilteredCalls(allCalls)
+    
+    // Filter to only connected calls (connected === 1)
+    const connectedCalls = filteredCalls.filter((call: any) => call.connected === 1)
+    
+    // Transform to PitchDataTable format
+    return connectedCalls.map((call: any) => ({
+      employee: call.employee || '',
+      date: call.date || null,
+      connected: call.connected || 0,
+      pitched: call.pitched || 0,
+      id: call.id ?? null,
+    }))
+  })() : []
+
+  // Filter pitched calls for conversion data table
+  const filteredPitchedCalls = rawData ? (() => {
+    if (dashboardType !== 'setters') return []
+    
+    const callsKey = 'settersCalls'
+    const allCalls = rawData[callsKey] || []
+    const filteredCalls = getFilteredCalls(allCalls)
     
     // Filter to only pitched calls (pitched === 1)
     const pitchedCalls = filteredCalls.filter((call: any) => call.pitched === 1)
@@ -799,6 +841,20 @@ export function DashboardContent() {
       id: call.id ?? null, // Use call.id as customer ID
     }))
   })() : []
+
+  // Transform all calls for connection and dials per hour data tables
+  const connectionTableData = filteredAllCalls.map((call: any) => ({
+    employee: call.employee || '',
+    date: call.date || null,
+    connected: call.connected || 0,
+    id: call.id ?? null,
+  }))
+
+  const dialsPerHourTableData = filteredAllCalls.map((call: any) => ({
+    employee: call.employee || '',
+    date: call.date || null,
+    id: call.id ?? null,
+  }))
 
   if (error) {
     return (
@@ -1306,6 +1362,8 @@ export function DashboardContent() {
                   { label: "Elite", min: 34, color: "#3b82f6" },
                 ]}
                 formula="Total Calls ÷ Total Hours"
+                showDataIcon={true}
+                onViewData={() => setDialsPerHourTableOpen(true)}
               />
               <CircularGauge
                 title="Connection %"
@@ -1323,6 +1381,8 @@ export function DashboardContent() {
                   { label: "Elite", min: 21, color: "#3b82f6" },
                 ]}
                 formula="(Total Connected ÷ Total Calls) × 100"
+                showDataIcon={true}
+                onViewData={() => setConnectionTableOpen(true)}
               />
               <CircularGauge
                 title="Pitch %"
@@ -1340,6 +1400,8 @@ export function DashboardContent() {
                   { label: "Elite", min: 80, color: "#3b82f6" },
                 ]}
                 formula="(Total Pitched ÷ Total Connected) × 100"
+                showDataIcon={true}
+                onViewData={() => setPitchTableOpen(true)}
               />
               <CircularGauge
                 title="Conversion %"
@@ -1869,6 +1931,21 @@ export function DashboardContent() {
             data={filteredPitchedCalls}
             open={conversionTableOpen}
             onOpenChange={setConversionTableOpen}
+          />
+          <PitchDataTable
+            data={filteredConnectedCalls}
+            open={pitchTableOpen}
+            onOpenChange={setPitchTableOpen}
+          />
+          <ConnectionDataTable
+            data={connectionTableData}
+            open={connectionTableOpen}
+            onOpenChange={setConnectionTableOpen}
+          />
+          <DialsPerHourDataTable
+            data={dialsPerHourTableData}
+            open={dialsPerHourTableOpen}
+            onOpenChange={setDialsPerHourTableOpen}
           />
         </>
       )}
