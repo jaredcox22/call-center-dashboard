@@ -796,8 +796,7 @@ export function DashboardContent() {
       pitched: call.pitched || 0,
       positive: call.positive || 0,
       qualified: call.qualified ?? null,
-      leadId: call.leadId ?? null,
-      cst_id: call.cst_id ?? null,
+      id: call.id ?? null, // Use call.id as customer ID
     }))
   })() : []
 
@@ -1854,20 +1853,24 @@ export function DashboardContent() {
 
       {/* STL Data Table Dialog */}
       {rawData && rawData.stl && (
-        <STLDataTable
-          data={filteredStlData}
-          open={stlTableOpen}
-          onOpenChange={setStlTableOpen}
-        />
+        <>
+          <STLDataTable
+            data={filteredStlData}
+            open={stlTableOpen}
+            onOpenChange={setStlTableOpen}
+          />
+        </>
       )}
 
       {/* Conversion Data Table Dialog */}
       {dashboardType === 'setters' && (
-        <ConversionDataTable
-          data={filteredPitchedCalls}
-          open={conversionTableOpen}
-          onOpenChange={setConversionTableOpen}
-        />
+        <>
+          <ConversionDataTable
+            data={filteredPitchedCalls}
+            open={conversionTableOpen}
+            onOpenChange={setConversionTableOpen}
+          />
+        </>
       )}
     </div>
   )

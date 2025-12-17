@@ -43,8 +43,7 @@ interface ConversionRecord {
   pitched: number
   positive: number
   qualified: boolean | null
-  leadId?: number | null
-  cst_id?: number | null
+  id?: number | null
 }
 
 interface ConversionDataTableProps {
@@ -53,7 +52,7 @@ interface ConversionDataTableProps {
   onOpenChange: (open: boolean) => void
 }
 
-type SortField = "employee" | "date" | "positive" | "qualified" | "leadId" | "cst_id"
+type SortField = "employee" | "date" | "positive" | "qualified" | "id"
 type SortDirection = "asc" | "desc" | null
 
 export function ConversionDataTable({ data, open, onOpenChange }: ConversionDataTableProps) {
@@ -85,8 +84,7 @@ export function ConversionDataTable({ data, open, onOpenChange }: ConversionData
       const query = searchQuery.toLowerCase()
       return (
         (record.employee?.toLowerCase() ?? "").includes(query) ||
-        (record.leadId?.toString() ?? "").includes(query) ||
-        (record.cst_id?.toString() ?? "").includes(query) ||
+        (record.id?.toString() ?? "").includes(query) ||
         formatDate(record.date).toLowerCase().includes(query) ||
         (record.positive === 1 ? "yes" : "no").includes(query) ||
         (record.qualified === true ? "yes" : record.qualified === false ? "no" : "n/a").includes(query)
@@ -224,7 +222,7 @@ export function ConversionDataTable({ data, open, onOpenChange }: ConversionData
           {/* Search Input */}
           <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
             <Input
-              placeholder="Search by employee, date, lead ID, customer ID, or conversion status..."
+              placeholder="Search by employee, date, call ID, or conversion status..."
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
               className="w-full"
@@ -288,19 +286,18 @@ export function ConversionDataTable({ data, open, onOpenChange }: ConversionData
                       variant="ghost"
                       size="sm"
                       className="h-8 -ml-2"
-                      onClick={() => handleSort("leadId")}
+                      onClick={() => handleSort("id")}
                     >
-                      Lead ID
-                      {getSortIcon("leadId")}
+                      Call ID
+                      {getSortIcon("id")}
                     </Button>
                   </TableHead>
-                  <TableHead className="w-[100px] hidden md:table-cell">Customer ID</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
                 {filteredAndSortedData.length === 0 ? (
                   <TableRow>
-                    <TableCell colSpan={6} className="text-center py-8 text-muted-foreground">
+                    <TableCell colSpan={5} className="text-center py-8 text-muted-foreground">
                       {searchQuery ? "No records found matching your search." : "No data available."}
                     </TableCell>
                   </TableRow>
@@ -330,10 +327,7 @@ export function ConversionDataTable({ data, open, onOpenChange }: ConversionData
                         )}
                       </TableCell>
                       <TableCell className="text-sm text-muted-foreground hidden sm:table-cell">
-                        {record.leadId ?? "N/A"}
-                      </TableCell>
-                      <TableCell className="text-sm text-muted-foreground hidden md:table-cell">
-                        {record.cst_id ?? "N/A"}
+                        {record.id ?? "N/A"}
                       </TableCell>
                     </TableRow>
                   ))
