@@ -2,7 +2,7 @@
 
 import { Card } from "@/components/ui/card"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
-import { Info } from "lucide-react"
+import { Info, Table2 } from "lucide-react"
 import { useEffect, useState } from "react"
 
 interface MetricRange {
@@ -23,9 +23,11 @@ interface CircularGaugeProps {
   ranges?: MetricRange[]
   target?: number
   formula?: string // Optional formula to display in performance ranges popover
+  showDataIcon?: boolean // Show data table icon in top left
+  onViewData?: () => void // Callback when data icon is clicked
 }
 
-export function CircularGauge({ title, value, max, color, unit, inverted = false, size = "medium", ranges, target, formula }: CircularGaugeProps) {
+export function CircularGauge({ title, value, max, color, unit, inverted = false, size = "medium", ranges, target, formula, showDataIcon = false, onViewData }: CircularGaugeProps) {
   const [animatedValue, setAnimatedValue] = useState(0)
 
   useEffect(() => {
@@ -78,6 +80,15 @@ export function CircularGauge({ title, value, max, color, unit, inverted = false
 
   return (
     <Card className={`${config.padding} relative`}>
+      {showDataIcon && onViewData && (
+        <button 
+          onClick={onViewData}
+          className="absolute left-2 top-2 text-muted-foreground hover:text-foreground transition-colors"
+          aria-label="View data table"
+        >
+          <Table2 className="h-3.5 w-3.5" />
+        </button>
+      )}
       {ranges && ranges.length > 0 && (
         <Popover>
           <PopoverTrigger asChild>

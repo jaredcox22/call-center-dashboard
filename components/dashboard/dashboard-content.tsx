@@ -13,6 +13,7 @@ import { CircularGauge } from "./circular-gauge"
 import { EmployeeIndicator } from "./employee-indicator"
 import { FeaturedMetricCard } from "./featured-metric-card"
 import { STLDataTable } from "./stl-data-table"
+import { ConversionDataTable } from "./conversion-data-table"
 import { LogOut, RefreshCw, Moon, Sun, Menu, CalendarIcon, AlertCircle, Users, ChevronDown } from "lucide-react"
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetTrigger } from "@/components/ui/sheet"
 import {
@@ -527,6 +528,7 @@ export function DashboardContent() {
   const [datePickerOpen, setDatePickerOpen] = useState(false)
   const [mobilePickerOpen, setMobilePickerOpen] = useState(false)
   const [stlTableOpen, setStlTableOpen] = useState(false)
+  const [conversionTableOpen, setConversionTableOpen] = useState(false)
   
   // Time range state for primary date range
   const [customTimeRange, setCustomTimeRange] = useState<{ startHour: number | undefined; endHour: number | undefined }>({
@@ -615,7 +617,7 @@ export function DashboardContent() {
     dashboardType,
     secondaryConfirmedTimeRange
   ) : null
-  console.log(data);
+
   // Get unique employees from the appropriate calls array based on dashboard type
   const availableEmployees = rawData ? (() => {
     const callsKey = dashboardType === 'setters' ? 'settersCalls' : 'confirmersCalls'
@@ -759,6 +761,44 @@ export function DashboardContent() {
       })
     }
     return rawData.stl
+  })() : []
+
+  // Filter pitched calls for conversion data table
+  const filteredPitchedCalls = rawData ? (() => {
+    if (dashboardType !== 'setters') return []
+    
+    const callsKey = 'settersCalls'
+    const allCalls = rawData[callsKey] || []
+    
+    // Filter by time range if provided (only when using Custom Dates)
+    let timeFilteredCalls = allCalls
+    if (timePeriod === 'Custom Dates' && confirmedTimeRange && (confirmedTimeRange.startHour !== undefined || confirmedTimeRange.endHour !== undefined)) {
+      timeFilteredCalls = allCalls.filter((call: any) => {
+        if (!call.date) return false
+        const hour = extractHourFromDateString(call.date)
+        return isHourInTimeRange(hour, confirmedTimeRange.startHour, confirmedTimeRange.endHour)
+      })
+    }
+    
+    // Filter by employee if employees are selected
+    let filteredCalls = timeFilteredCalls
+    if (selectedEmployees.length > 0) {
+      filteredCalls = timeFilteredCalls.filter((call: any) => selectedEmployees.includes(call.employee))
+    }
+    
+    // Filter to only pitched calls (pitched === 1)
+    const pitchedCalls = filteredCalls.filter((call: any) => call.pitched === 1)
+    
+    // Transform to ConversionDataTable format
+    return pitchedCalls.map((call: any) => ({
+      employee: call.employee || '',
+      date: call.date || null,
+      pitched: call.pitched || 0,
+      positive: call.positive || 0,
+      qualified: call.qualified ?? null,
+      leadId: call.leadId ?? null,
+      cst_id: call.cst_id ?? null,
+    }))
   })() : []
 
   if (error) {
@@ -1318,6 +1358,8 @@ export function DashboardContent() {
                   { label: "Elite", min: 40, color: "#3b82f6" },
                 ]}
                 formula="(Total Positive ÷ Total Pitched) × 100"
+                showDataIcon={true}
+                onViewData={() => setConversionTableOpen(true)}
               />
             </div>
             )}
@@ -1816,6 +1858,15 @@ export function DashboardContent() {
           data={filteredStlData}
           open={stlTableOpen}
           onOpenChange={setStlTableOpen}
+        />
+      )}
+
+      {/* Conversion Data Table Dialog */}
+      {dashboardType === 'setters' && (
+        <ConversionDataTable
+          data={filteredPitchedCalls}
+          open={conversionTableOpen}
+          onOpenChange={setConversionTableOpen}
         />
       )}
     </div>
