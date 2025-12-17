@@ -3,7 +3,7 @@
 import { Card } from "@/components/ui/card"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { Info, Table2 } from "lucide-react"
-import { useEffect, useState } from "react"
+import { useEffect, useState, startTransition } from "react"
 
 interface MetricRange {
   label: string
@@ -82,7 +82,12 @@ export function CircularGauge({ title, value, max, color, unit, inverted = false
     <Card className={`${config.padding} relative`}>
       {showDataIcon && onViewData && (
         <button 
-          onClick={onViewData}
+          onClick={() => {
+            // Use startTransition to make dialog opening non-blocking
+            startTransition(() => {
+              onViewData()
+            })
+          }}
           className="absolute left-2 top-2 text-muted-foreground hover:text-foreground transition-colors"
           aria-label="View data table"
         >

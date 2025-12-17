@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useMemo } from "react"
+import { useState, useMemo, useEffect, startTransition } from "react"
 import {
   Dialog,
   DialogContent,
@@ -17,12 +17,21 @@ import {
   TableRow,
 } from "@/components/ui/table"
 import { Input } from "@/components/ui/input"
-import { ArrowUpDown, ArrowUp, ArrowDown, Info, ChevronDown } from "lucide-react"
+import { ArrowUpDown, ArrowUp, ArrowDown, Info, ChevronDown, ChevronLeft, ChevronRight } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { format } from "date-fns"
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible"
 import { Card } from "@/components/ui/card"
+import {
+  Pagination,
+  PaginationContent,
+  PaginationItem,
+  PaginationLink,
+  PaginationNext,
+  PaginationPrevious,
+  PaginationEllipsis,
+} from "@/components/ui/pagination"
 
 /**
  * Formats a date string to a readable format
@@ -59,11 +68,24 @@ export function GrossIssueDataTable({ data, open, onOpenChange }: GrossIssueData
   const [sortField, setSortField] = useState<SortField>("date")
   const [sortDirection, setSortDirection] = useState<SortDirection>("desc")
   const [isInfoOpen, setIsInfoOpen] = useState(false)
+  const [currentPage, setCurrentPage] = useState(1)
+  const itemsPerPage = 50 // Render only 50 rows at a time to prevent blocking
 
   // Filter to only calls where ApptSet > 0
   const apptSetData = useMemo(() => {
     return data.filter((record) => record.ApptSet != null && record.ApptSet > 0)
   }, [data])
+
+  // Pre-compute formatted dates to avoid calling formatDate during rendering
+  const formattedDates = useMemo(() => {
+    const dateMap = new Map<string | null, string>()
+    apptSetData.forEach((record) => {
+      if (!dateMap.has(record.date)) {
+        dateMap.set(record.date, formatDate(record.date))
+      }
+    })
+    return dateMap
+  }, [apptSetData])
 
   // Calculate summary stats
   const summaryStats = useMemo(() => {
@@ -80,12 +102,17 @@ export function GrossIssueDataTable({ data, open, onOpenChange }: GrossIssueData
 
   // Filter and sort data
   const filteredAndSortedData = useMemo(() => {
+    const query = searchQuery.toLowerCase()
+    const hasQuery = query.length > 0
     let filtered = apptSetData.filter((record) => {
-      const query = searchQuery.toLowerCase()
+      if (!hasQuery) return true // Skip filtering when search query is empty
+      
+      // Use pre-computed formatted date when searching
+      const formattedDate = formattedDates.get(record.date) ?? formatDate(record.date)
       return (
         (record.employee?.toLowerCase() ?? "").includes(query) ||
         (record.id?.toString() ?? "").includes(query) ||
-        formatDate(record.date).toLowerCase().includes(query) ||
+        formattedDate.toLowerCase().includes(query) ||
         (record.Issued != null && record.Issued > 0 ? "yes" : "no").includes(query)
       )
     })
@@ -119,7 +146,55 @@ export function GrossIssueDataTable({ data, open, onOpenChange }: GrossIssueData
     }
 
     return filtered
-  }, [apptSetData, searchQuery, sortField, sortDirection])
+  }, [apptSetData, searchQuery, sortField, sortDirection, formattedDates])
+
+  // Reset to page 1 when search or sort changes
+  useEffect(() => {
+    setCurrentPage(1)
+  }, [searchQuery, sortField, sortDirection])
+
+  // Calculate pagination
+  const totalPages = Math.ceil(filteredAndSortedData.length / itemsPerPage)
+  const startIndex = (currentPage - 1) * itemsPerPage
+  const endIndex = startIndex + itemsPerPage
+  const paginatedData = filteredAndSortedData.slice(startIndex, endIndex)
+
+  // Generate page numbers to display
+  const getPageNumbers = () => {
+    const pages: (number | string)[] = []
+    const maxVisible = 5
+    
+    if (totalPages <= maxVisible) {
+      // Show all pages if total is less than max visible
+      for (let i = 1; i <= totalPages; i++) {
+        pages.push(i)
+      }
+    } else {
+      // Always show first page
+      pages.push(1)
+      
+      if (currentPage > 3) {
+        pages.push("ellipsis-start")
+      }
+      
+      // Show pages around current page
+      const start = Math.max(2, currentPage - 1)
+      const end = Math.min(totalPages - 1, currentPage + 1)
+      
+      for (let i = start; i <= end; i++) {
+        pages.push(i)
+      }
+      
+      if (currentPage < totalPages - 2) {
+        pages.push("ellipsis-end")
+      }
+      
+      // Always show last page
+      pages.push(totalPages)
+    }
+    
+    return pages
+  }
 
   const handleSort = (field: SortField) => {
     if (sortField === field) {
@@ -218,7 +293,7 @@ export function GrossIssueDataTable({ data, open, onOpenChange }: GrossIssueData
               className="w-full"
             />
             <div className="text-sm text-muted-foreground whitespace-nowrap text-center sm:text-left">
-              {filteredAndSortedData.length} of {apptSetData.length} records
+              Showing {startIndex + 1}-{Math.min(endIndex, filteredAndSortedData.length)} of {filteredAndSortedData.length} records
             </div>
           </div>
 
@@ -281,13 +356,13 @@ export function GrossIssueDataTable({ data, open, onOpenChange }: GrossIssueData
                     </TableCell>
                   </TableRow>
                 ) : (
-                  filteredAndSortedData.map((record, index) => (
-                    <TableRow key={`gross-issue-${record.id ?? record.employee}-${record.date}-${index}`}>
+                  paginatedData.map((record, index) => (
+                    <TableRow key={`gross-issue-${record.id ?? record.employee}-${record.date}-${startIndex + index}`}>
                       <TableCell className="min-w-[120px] font-medium">
                         {record.employee || "N/A"}
                       </TableCell>
                       <TableCell className="text-sm text-muted-foreground min-w-[160px]">
-                        {formatDate(record.date)}
+                        {formattedDates.get(record.date) ?? formatDate(record.date)}
                       </TableCell>
                       <TableCell className="font-medium">
                         {record.Issued != null && record.Issued > 0 ? (
@@ -305,6 +380,61 @@ export function GrossIssueDataTable({ data, open, onOpenChange }: GrossIssueData
               </TableBody>
             </Table>
           </div>
+
+          {/* Pagination */}
+          {filteredAndSortedData.length > itemsPerPage && (
+            <div className="flex justify-center pt-4">
+              <Pagination>
+                <PaginationContent>
+                  <PaginationItem>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => setCurrentPage((prev) => Math.max(1, prev - 1))}
+                      disabled={currentPage === 1}
+                      className="gap-1"
+                    >
+                      <ChevronLeft className="h-4 w-4" />
+                      <span className="hidden sm:inline">Previous</span>
+                    </Button>
+                  </PaginationItem>
+                  {getPageNumbers().map((page, index) => {
+                    if (page === "ellipsis-start" || page === "ellipsis-end") {
+                      return (
+                        <PaginationItem key={`ellipsis-${index}`}>
+                          <PaginationEllipsis />
+                        </PaginationItem>
+                      )
+                    }
+                    return (
+                      <PaginationItem key={page}>
+                        <Button
+                          variant={currentPage === page ? "outline" : "ghost"}
+                          size="sm"
+                          onClick={() => setCurrentPage(page as number)}
+                          className="min-w-10"
+                        >
+                          {page}
+                        </Button>
+                      </PaginationItem>
+                    )
+                  })}
+                  <PaginationItem>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => setCurrentPage((prev) => Math.min(totalPages, prev + 1))}
+                      disabled={currentPage === totalPages}
+                      className="gap-1"
+                    >
+                      <span className="hidden sm:inline">Next</span>
+                      <ChevronRight className="h-4 w-4" />
+                    </Button>
+                  </PaginationItem>
+                </PaginationContent>
+              </Pagination>
+            </div>
+          )}
         </div>
       </DialogContent>
     </Dialog>
