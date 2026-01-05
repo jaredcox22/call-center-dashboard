@@ -46,6 +46,7 @@ $holidays = [
         $responseData = [
             'settersCalls' => [],
             'confirmersCalls' => [],
+            'ippCalls' => [],
             'hours' => [],
         ];
     }
@@ -200,65 +201,207 @@ $holidays = [
     if(array_key_exists('test', $_GET)){
 
     }else{
-        $settersCallsQuery = "SELECT emp_user_12, LastName, cls_Calls.id as id, FirstName, CallDate, ResultCode, cty_id, Connected, Pitched, Positive, qualified, lds_Leads.ApptSet, lds_Leads.Issued FROM cls_Calls LEFT JOIN clr_CallResults ON ResultCode = clr_CallResults.id LEFT JOIN emp_Employees ON emp_id = emp_Employees.id LEFT JOIN lds_Leads ON cls_Calls.lds_id = lds_Leads.id LEFT JOIN srs_SourceSubs ON lds_Leads.srs_id = srs_SourceSubs.id WHERE CallDate BETWEEN '$start' AND '$end' AND ResultCode NOT LIKE '%ND%' AND Dialer = 'True' AND emp_user_12 > 0 AND cty_id != 'C'";
+        // Get all calls first (both setters and confirmers based on cty_id)
+        $settersCallsQuery = "SELECT emp_user_12, LastName, cls_Calls.id as id, FirstName, CallDate, ResultCode, cty_id, Connected, Pitched, Positive, qualified, lds_Leads.ApptSet, lds_Leads.Issued FROM cls_Calls LEFT JOIN clr_CallResults ON ResultCode = clr_CallResults.id LEFT JOIN emp_Employees ON emp_id = emp_Employees.id LEFT JOIN lds_Leads ON cls_Calls.lds_id = lds_Leads.id LEFT JOIN srs_SourceSubs ON lds_Leads.srs_id = srs_SourceSubs.id WHERE CallDate BETWEEN '$start' AND '$end' AND ResultCode NOT LIKE '%ND%' AND Dialer = 'True' AND emp_user_12 > 0 AND cty_id NOT IN ('C', 'IPP')";
         $settersCalls = curlCall("$endpoint/lp/customReport.php?rptSQL=" . urlencode($settersCallsQuery));
 
         $confirmersCallsQuery = "SELECT emp_user_12, LastName, cls_Calls.id as id, FirstName, CallDate, ResultCode, cty_id, Connected, Pitched, Positive, qualified, lds_Leads.ApptSet, lds_Leads.Issued FROM cls_Calls LEFT JOIN clr_CallResults ON ResultCode = clr_CallResults.id LEFT JOIN emp_Employees ON emp_id = emp_Employees.id LEFT JOIN lds_Leads ON cls_Calls.lds_id = lds_Leads.id LEFT JOIN srs_SourceSubs ON lds_Leads.srs_id = srs_SourceSubs.id WHERE CallDate BETWEEN '$start' AND '$end' AND ResultCode NOT LIKE '%ND%' AND Dialer = 'True' AND emp_user_12 > 0 AND cty_id = 'C'";
         $confirmersCalls = curlCall("$endpoint/lp/customReport.php?rptSQL=" . urlencode($confirmersCallsQuery));
 
+        $ippCallsQuery = "SELECT emp_user_12, LastName, cls_Calls.id as id, FirstName, CallDate, ResultCode, cty_id, Connected, Pitched, Positive, qualified, lds_Leads.ApptSet, lds_Leads.Issued FROM cls_Calls LEFT JOIN clr_CallResults ON ResultCode = clr_CallResults.id LEFT JOIN emp_Employees ON emp_id = emp_Employees.id LEFT JOIN lds_Leads ON cls_Calls.lds_id = lds_Leads.id LEFT JOIN srs_SourceSubs ON lds_Leads.srs_id = srs_SourceSubs.id WHERE CallDate BETWEEN '$start' AND '$end' AND ResultCode NOT LIKE '%ND%' AND Dialer = 'True' AND emp_user_12 > 0 AND cty_id = 'IPP'";
+        $ippCalls = curlCall("$endpoint/lp/customReport.php?rptSQL=" . urlencode($ippCallsQuery));
+        // Collect all deputy IDs from all calls
         $deputyIDs = [];
-
         foreach($settersCalls as $call){
             if(!in_array($call['emp_user_12'], $deputyIDs)){
                 $deputyIDs[] = $call['emp_user_12'];
             }
         }
-
         foreach($confirmersCalls as $call){
             if(!in_array($call['emp_user_12'], $deputyIDs)){
                 $deputyIDs[] = $call['emp_user_12'];
             }
         }
-
+        foreach($ippCalls as $call){
+            if(!in_array($call['emp_user_12'], $deputyIDs)){
+                $deputyIDs[] = $call['emp_user_12'];
+            }
+        }
+        // Fetch timesheets for all deputy IDs to determine their operational unit and calculate hours
         $timesheets = [];
         $timesheetEmployees = [];
+        $settersTimesheetEmployees = []; // Hours for employees clocked into Setter operational unit
+        $confirmersTimesheetEmployees = []; // Hours for employees clocked into Confirmer operational unit
+        $ippTimesheetEmployees = []; // Hours for employees clocked into IPP Dialing - Office operational unit
+        $employeeType = []; // Track if employee is setter or confirmer
+        $employeeOperationalUnits = []; // Track operational units from timesheets
+        $deputyIDOperationalUnits = []; // Track operational units per deputy ID to classify them
 
         foreach($deputyIDs as $deputyID){
             $theseTimesheets = curlCall("$endpoint/deputy/getTimesheets.php?startDate=$start&endDate=$end&id=" . intval($deputyID));
             foreach($theseTimesheets as $timesheet){
-                // if($timesheet['_DPMetaData']['OperationalUnitInfo']['OperationalUnitName'] != 'Setter'){
-                //     continue;
-                // }
+                // Capture operational unit information
+                $operationalUnitName = null;
+                if(isset($timesheet['_DPMetaData']['OperationalUnitInfo']['OperationalUnitName'])){
+                    $operationalUnitName = $timesheet['_DPMetaData']['OperationalUnitInfo']['OperationalUnitName'];
+                }
+                
+                // Track operational units for this deputy ID (for classification)
+                if($operationalUnitName){
+                    if(!isset($deputyIDOperationalUnits[$deputyID])){
+                        $deputyIDOperationalUnits[$deputyID] = [];
+                    }
+                    if(!in_array($operationalUnitName, $deputyIDOperationalUnits[$deputyID])){
+                        $deputyIDOperationalUnits[$deputyID][] = $operationalUnitName;
+                    }
+                }
+                
+                // Determine if this timesheet is for a setter, confirmer, or IPP based on operational unit
+                $isSetterOperationalUnit = $operationalUnitName === 'Setter';
+                $isConfirmerOperationalUnit = $operationalUnitName && (
+                    $operationalUnitName === 'Confirmer' || 
+                    $operationalUnitName === 'Confirmer - Office' ||
+                    stripos($operationalUnitName, 'Confirmer') !== false
+                );
+                $isIPPOperationalUnit = $operationalUnitName && (
+                    $operationalUnitName === 'IPP Dialing - Office' ||
+                    stripos($operationalUnitName, 'IPP Dialing') !== false
+                );
+                
                 if($timesheet['IsInProgress']){
                     $timesheet['EndTimeLocalized'] = date('Y-m-d H:i:s');
                 }
                 $timesheets[] = $timesheet;
                 $employeeID = $timesheet['Employee'];
+                
+                // Calculate hours for this timesheet
+                $hoursToAdd = 0;
+                if($timesheet['IsInProgress'] && isset($timesheet['StartTimeLocalized'])){
+                    $currentTime = date('Y-m-d H:i:s');
+                    $hoursToAdd = (strtotime($currentTime) - strtotime($timesheet['StartTimeLocalized'])) / 60 / 60;
+                }else if(isset($timesheet['TotalTime']) && $timesheet['TotalTime'] !== '' && $timesheet['TotalTime'] !== null){
+                    $hoursToAdd = floatval($timesheet['TotalTime']);
+                }else if(isset($timesheet['StartTimeLocalized']) && isset($timesheet['EndTimeLocalized'])){
+                    $hoursToAdd = (strtotime($timesheet['EndTimeLocalized']) - strtotime($timesheet['StartTimeLocalized'])) / 60 / 60;
+                }
+                
+                // Add to general timesheetEmployees (for backward compatibility)
                 if(!array_key_exists($employeeID, $timesheetEmployees)){
                     $timesheetEmployees[$employeeID] = ['hours' => 0];
                 }
-                // For in-progress timesheets, calculate from start time to current time for live updates
-                if($timesheet['IsInProgress'] && isset($timesheet['StartTimeLocalized'])){
-                    $currentTime = date('Y-m-d H:i:s');
-                    $timesheetEmployees[$employeeID]['hours'] += (strtotime($currentTime) - strtotime($timesheet['StartTimeLocalized'])) / 60 / 60;
-                }else if(isset($timesheet['TotalTime']) && $timesheet['TotalTime'] !== '' && $timesheet['TotalTime'] !== null){
-                    // Use TotalTime for completed timesheets
-                    $timesheetEmployees[$employeeID]['hours'] += floatval($timesheet['TotalTime']);
-                }else if(isset($timesheet['StartTimeLocalized']) && isset($timesheet['EndTimeLocalized'])){
-                    // Fallback: calculate from start/end times if TotalTime not available
-                    $timesheetEmployees[$employeeID]['hours'] += (strtotime($timesheet['EndTimeLocalized']) - strtotime($timesheet['StartTimeLocalized'])) / 60 / 60;
+                $timesheetEmployees[$employeeID]['hours'] += $hoursToAdd;
+                
+                // Add to setter-specific hours if operational unit is Setter
+                if($isSetterOperationalUnit){
+                    if(!array_key_exists($employeeID, $settersTimesheetEmployees)){
+                        $settersTimesheetEmployees[$employeeID] = ['hours' => 0];
+                    }
+                    $settersTimesheetEmployees[$employeeID]['hours'] += $hoursToAdd;
+                }
+                
+                // Add to confirmer-specific hours if operational unit is Confirmer
+                if($isConfirmerOperationalUnit){
+                    if(!array_key_exists($employeeID, $confirmersTimesheetEmployees)){
+                        $confirmersTimesheetEmployees[$employeeID] = ['hours' => 0];
+                    }
+                    $confirmersTimesheetEmployees[$employeeID]['hours'] += $hoursToAdd;
+                }
+                
+                // Add to IPP-specific hours if operational unit is IPP Dialing - Office
+                if($isIPPOperationalUnit){
+                    if(!array_key_exists($employeeID, $ippTimesheetEmployees)){
+                        $ippTimesheetEmployees[$employeeID] = ['hours' => 0];
+                    }
+                    $ippTimesheetEmployees[$employeeID]['hours'] += $hoursToAdd;
+                }
+                
+                // Track operational units for this employee
+                if($operationalUnitName){
+                    if(!isset($employeeOperationalUnits[$employeeID])){
+                        $employeeOperationalUnits[$employeeID] = [];
+                    }
+                    if(!in_array($operationalUnitName, $employeeOperationalUnits[$employeeID])){
+                        $employeeOperationalUnits[$employeeID][] = $operationalUnitName;
+                    }
                 }
             }
         }
+        
+        // Classify deputy IDs based on operational unit
+        $settersDeputyIDs = [];
+        $confirmersDeputyIDs = [];
+        $ippDeputyIDs = [];
+        foreach($deputyIDs as $deputyID){
+            $hasSetterUnit = false;
+            $hasConfirmerUnit = false;
+            $hasIPPUnit = false;
+            
+            if(isset($deputyIDOperationalUnits[$deputyID])){
+                foreach($deputyIDOperationalUnits[$deputyID] as $unitName){
+                    if($unitName === 'Setter'){
+                        $hasSetterUnit = true;
+                    }
+                    if($unitName === 'Confirmer' || $unitName === 'Confirmer - Office' || stripos($unitName, 'Confirmer') !== false){
+                        $hasConfirmerUnit = true;
+                    }
+                    if($unitName === 'IPP Dialing - Office' || stripos($unitName, 'IPP Dialing') !== false){
+                        $hasIPPUnit = true;
+                    }
+                }
+            }
+            // Classify based on operational unit (priority: Setter > Confirmer > IPP)
+            if($hasSetterUnit){
+                $settersDeputyIDs[] = $deputyID;
+            } 
+            if($hasConfirmerUnit){
+                $confirmersDeputyIDs[] = $deputyID;
+            }
+            if($hasIPPUnit){
+                $ippDeputyIDs[] = $deputyID;
+            } else {
+                // If no operational unit found, default to setter (backward compatibility)
+                $settersDeputyIDs[] = $deputyID;
+            }
+        }
+        // DEBUG: Track employee types
+        $debugInfo = [
+            'settersDeputyIDs' => $settersDeputyIDs,
+            'confirmersDeputyIDs' => $confirmersDeputyIDs,
+            'ippDeputyIDs' => $ippDeputyIDs,
+            'allDeputyIDs' => $deputyIDs,
+            'deputyIDOperationalUnits' => $deputyIDOperationalUnits,
+            'settersEmployeeNames' => [],
+            'confirmersEmployeeNames' => [],
+            'ippEmployeeNames' => [],
+            'timesheetProcessing' => [],
+            'timesheetEmployeesDetails' => [],
+            'finalHoursBreakdown' => []
+        ];
 
+        // Process setters calls - only include if deputy ID is classified as setter
         foreach($settersCalls as $call){
-            if(!array_key_exists(intval($call['emp_user_12']), $timesheetEmployees)){
+            $deputyID = $call['emp_user_12'];
+            // Only include if this deputy ID is classified as a setter based on operational unit
+            if(!in_array($deputyID, $settersDeputyIDs)){
                 continue;
             }
-            $timesheetEmployees[intval($call['emp_user_12'])]['employee'] = $call   ['FirstName'] . " " . $call['LastName'];
+            if(!array_key_exists(intval($deputyID), $timesheetEmployees)){
+                continue;
+            }
+            $employeeName = $call['FirstName'] . " " . $call['LastName'];
+            $employeeID = intval($deputyID);
+            $timesheetEmployees[$employeeID]['employee'] = $employeeName;
+            // Set employee name in setter-specific hours if they have setter hours
+            if(array_key_exists($employeeID, $settersTimesheetEmployees)){
+                $settersTimesheetEmployees[$employeeID]['employee'] = $employeeName;
+            }
+            $employeeType[$employeeID] = 'setter';
+            if(!in_array($employeeName, $debugInfo['settersEmployeeNames'])){
+                $debugInfo['settersEmployeeNames'][] = $employeeName;
+            }
             $responseData['settersCalls'][] = [
                 'id' => $call['id'],
-                'employee' => $call['FirstName'] . " " . $call['LastName'],
+                'employee' => $employeeName,
                 'date' => $call['CallDate'],
                 'result' => $call['ResultCode'],
                 'cty_id' => $call['cty_id'],
@@ -271,15 +414,31 @@ $holidays = [
             ];
         }
 
+        // Process confirmers calls - only include if deputy ID is classified as confirmer
         foreach($confirmersCalls as $call){
-            if(!array_key_exists(intval($call['emp_user_12']), $timesheetEmployees)){
+            $deputyID = $call['emp_user_12'];
+            // Only include if this deputy ID is classified as a confirmer based on operational unit
+            if(!in_array($deputyID, $confirmersDeputyIDs)){
+                continue;
+            }
+            if(!array_key_exists(intval($deputyID), $timesheetEmployees)){
                 continue;
             }
 
-            $timesheetEmployees[intval($call['emp_user_12'])]['employee'] = $call   ['FirstName'] . " " . $call['LastName'];
+            $employeeName = $call['FirstName'] . " " . $call['LastName'];
+            $employeeID = intval($deputyID);
+            $timesheetEmployees[$employeeID]['employee'] = $employeeName;
+            // Set employee name in confirmer-specific hours if they have confirmer hours
+            if(array_key_exists($employeeID, $confirmersTimesheetEmployees)){
+                $confirmersTimesheetEmployees[$employeeID]['employee'] = $employeeName;
+            }
+            $employeeType[$employeeID] = 'confirmer';
+            if(!in_array($employeeName, $debugInfo['confirmersEmployeeNames'])){
+                $debugInfo['confirmersEmployeeNames'][] = $employeeName;
+            }
             $responseData['confirmersCalls'][] = [
                 'id' => $call['id'],
-                'employee' => $call['FirstName'] . " " . $call['LastName'],
+                'employee' => $employeeName,
                 'date' => $call['CallDate'],
                 'result' => $call['ResultCode'],
                 'cty_id' => $call['cty_id'],
@@ -292,11 +451,243 @@ $holidays = [
             ];
         }
 
-        $responseData['hours'] = array_values($timesheetEmployees);
+        // Process IPP calls - only include if deputy ID is classified as IPP
+        foreach($ippCalls as $call){
+            $deputyID = $call['emp_user_12'];
+            // Only include if this deputy ID is classified as IPP based on operational unit
+            if(!in_array($deputyID, $ippDeputyIDs)){
+                continue;
+            }
+            if(!array_key_exists(intval($deputyID), $timesheetEmployees)){
+                continue;
+            }
 
-        // Get unique employee names for setters and confirmers
+            $employeeName = $call['FirstName'] . " " . $call['LastName'];
+            $employeeID = intval($deputyID);
+            $timesheetEmployees[$employeeID]['employee'] = $employeeName;
+            // Set employee name in IPP-specific hours if they have IPP hours
+            if(array_key_exists($employeeID, $ippTimesheetEmployees)){
+                $ippTimesheetEmployees[$employeeID]['employee'] = $employeeName;
+            }
+            $employeeType[$employeeID] = 'ipp';
+            if(!in_array($employeeName, $debugInfo['ippEmployeeNames'])){
+                $debugInfo['ippEmployeeNames'][] = $employeeName;
+            }
+            $responseData['ippCalls'][] = [
+                'id' => $call['id'],
+                'employee' => $employeeName,
+                'date' => $call['CallDate'],
+                'result' => $call['ResultCode'],
+                'cty_id' => $call['cty_id'],
+                'connected' => $call['Connected'],
+                'pitched' => $call['Pitched'],
+                'positive' => $call['Positive'],
+                'qualified' => ($call['qualified'] == 1 ? true : false),
+                'ApptSet' => $call['ApptSet'] ?? null,
+                'Issued' => $call['Issued'] ?? null,
+            ];
+        }
+        // DEBUG: Build detailed breakdown of timesheetEmployees
+        foreach($timesheetEmployees as $empID => $empData){
+            $debugInfo['timesheetEmployeesDetails'][] = [
+                'employeeID' => $empID,
+                'employeeName' => $empData['employee'] ?? 'UNKNOWN',
+                'hours' => $empData['hours'] ?? 0,
+                'type' => $employeeType[$empID] ?? 'UNKNOWN',
+                'deputyID' => in_array($empID, $settersDeputyIDs) ? 'SETTER' : (in_array($empID, $confirmersDeputyIDs) ? 'CONFIRMER' : 'NEITHER'),
+                'operationalUnits' => $employeeOperationalUnits[$empID] ?? [],
+                'isConfirmerByOperationalUnit' => !empty($employeeOperationalUnits[$empID]) && 
+                    (in_array('Confirmer - Office', $employeeOperationalUnits[$empID]) || 
+                     in_array('Confirmer', $employeeOperationalUnits[$empID]) ||
+                     preg_match('/confirmer/i', implode(' ', $employeeOperationalUnits[$empID])))
+            ];
+        }
+
+        // Set employee names for setter hours (in case they have hours but no calls)
+        foreach($settersTimesheetEmployees as $empID => $empData){
+            if(!isset($empData['employee']) || empty($empData['employee'])){
+                // Try to get name from timesheetEmployees
+                if(isset($timesheetEmployees[$empID]['employee'])){
+                    $settersTimesheetEmployees[$empID]['employee'] = $timesheetEmployees[$empID]['employee'];
+                } else {
+                    // Try to get name from setters calls
+                    foreach($settersCalls as $call){
+                        if(intval($call['emp_user_12']) == $empID){
+                            $settersTimesheetEmployees[$empID]['employee'] = $call['FirstName'] . " " . $call['LastName'];
+                            break;
+                        }
+                    }
+                }
+            }
+        }
+        
+        // Set employee names for confirmer hours (in case they have hours but no confirmer calls)
+        foreach($confirmersTimesheetEmployees as $empID => $empData){
+            if(!isset($empData['employee']) || empty($empData['employee'])){
+                // Try to get name from timesheetEmployees
+                if(isset($timesheetEmployees[$empID]['employee'])){
+                    $confirmersTimesheetEmployees[$empID]['employee'] = $timesheetEmployees[$empID]['employee'];
+                } else {
+                    // Try to get name from confirmers calls
+                    foreach($confirmersCalls as $call){
+                        if(intval($call['emp_user_12']) == $empID){
+                            $confirmersTimesheetEmployees[$empID]['employee'] = $call['FirstName'] . " " . $call['LastName'];
+                            break;
+                        }
+                    }
+                    // If still not found, try setters calls (they might have setter calls but confirmer hours)
+                    if(!isset($confirmersTimesheetEmployees[$empID]['employee'])){
+                        foreach($settersCalls as $call){
+                            if(intval($call['emp_user_12']) == $empID){
+                                $confirmersTimesheetEmployees[$empID]['employee'] = $call['FirstName'] . " " . $call['LastName'];
+                                break;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        
+        // Set employee names for IPP hours (in case they have hours but no calls)
+        foreach($ippTimesheetEmployees as $empID => $empData){
+            if(!isset($empData['employee']) || empty($empData['employee'])){
+                // Try to get name from timesheetEmployees
+                if(isset($timesheetEmployees[$empID]['employee'])){
+                    $ippTimesheetEmployees[$empID]['employee'] = $timesheetEmployees[$empID]['employee'];
+                } else {
+                    // Try to get name from setters calls
+                    foreach($settersCalls as $call){
+                        if(intval($call['emp_user_12']) == $empID){
+                            $ippTimesheetEmployees[$empID]['employee'] = $call['FirstName'] . " " . $call['LastName'];
+                            break;
+                        }
+                    }
+                    // If still not found, try confirmers calls
+                    if(!isset($ippTimesheetEmployees[$empID]['employee'])){
+                        foreach($confirmersCalls as $call){
+                            if(intval($call['emp_user_12']) == $empID){
+                                $ippTimesheetEmployees[$empID]['employee'] = $call['FirstName'] . " " . $call['LastName'];
+                                break;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        
+        // Use setter-specific hours array (based on operational unit) for setters dashboard
+        // This ensures only employees clocked into "Setter" operational unit appear in setters hours
+        $responseData['settersHours'] = array_values($settersTimesheetEmployees);
+        $responseData['confirmersHours'] = array_values($confirmersTimesheetEmployees);
+        $responseData['IPPHours'] = array_values($ippTimesheetEmployees);
+        
+        // DEBUG: Analyze final hours array (now using setter-specific hours)
+        $settersInHours = 0;
+        $confirmersInHours = 0;
+        $unknownInHours = 0;
+        $mismatches = [];
+        
+        foreach($responseData['settersHours'] as $hourEntry){
+            $empName = $hourEntry['employee'] ?? 'UNKNOWN';
+            $empHours = $hourEntry['hours'] ?? 0;
+            $isSetter = in_array($empName, $debugInfo['settersEmployeeNames']);
+            $isConfirmer = in_array($empName, $debugInfo['confirmersEmployeeNames']);
+            
+            // Find employee ID to get operational unit info
+            $empID = null;
+            foreach($timesheetEmployees as $id => $data){
+                if(($data['employee'] ?? '') === $empName){
+                    $empID = $id;
+                    break;
+                }
+            }
+            
+            $operationalUnits = $empID ? ($employeeOperationalUnits[$empID] ?? []) : [];
+            $isConfirmerByOperationalUnit = !empty($operationalUnits) && 
+                (in_array('Confirmer - Office', $operationalUnits) || 
+                 in_array('Confirmer', $operationalUnits) ||
+                 preg_match('/confirmer/i', implode(' ', $operationalUnits)));
+            $isSetterByOperationalUnit = !empty($operationalUnits) && 
+                in_array('Setter', $operationalUnits);
+            
+            $issue = 'OK';
+            if($isConfirmerByOperationalUnit && !$isSetterByOperationalUnit){
+                $issue = 'SHOULD_NOT_BE_HERE: Clocked in as CONFIRMER but in setters hours array';
+                $mismatches[] = $empName;
+            } elseif($isConfirmer && !$isSetter){
+                $issue = 'CONFIRMER_IN_SETTERS_HOURS';
+            }
+            
+            if($isConfirmer && !$isSetter){
+                $confirmersInHours++;
+            } elseif($isSetter && !$isConfirmer){
+                $settersInHours++;
+            } else {
+                $unknownInHours++;
+            }
+            
+            $debugInfo['finalHoursBreakdown'][] = [
+                'employee' => $empName,
+                'hours' => $empHours,
+                'isSetter' => $isSetter,
+                'isConfirmer' => $isConfirmer,
+                'operationalUnits' => $operationalUnits,
+                'isConfirmerByOperationalUnit' => $isConfirmerByOperationalUnit,
+                'isSetterByOperationalUnit' => $isSetterByOperationalUnit,
+                'issue' => $issue
+            ];
+        }
+        
+        // DEBUG: Also show what's in the setter-specific hours array
+        $debugInfo['settersHoursArray'] = [];
+        foreach($settersTimesheetEmployees as $empID => $empData){
+            $debugInfo['settersHoursArray'][] = [
+                'employeeID' => $empID,
+                'employeeName' => $empData['employee'] ?? 'UNKNOWN',
+                'hours' => $empData['hours'] ?? 0,
+                'operationalUnits' => $employeeOperationalUnits[$empID] ?? []
+            ];
+        }
+        
+        // DEBUG: Show what's in the confirmer-specific hours array
+        $debugInfo['confirmersHoursArray'] = [];
+        foreach($confirmersTimesheetEmployees as $empID => $empData){
+            $debugInfo['confirmersHoursArray'][] = [
+                'employeeID' => $empID,
+                'employeeName' => $empData['employee'] ?? 'UNKNOWN',
+                'hours' => $empData['hours'] ?? 0,
+                'operationalUnits' => $employeeOperationalUnits[$empID] ?? []
+            ];
+        }
+        
+        // DEBUG: Add summary
+        $debugInfo['summary'] = [
+            'totalSettersDeputyIDs' => count($settersDeputyIDs),
+            'totalConfirmersDeputyIDs' => count($confirmersDeputyIDs),
+            'totalDeputyIDs' => count($deputyIDs),
+            'totalSettersEmployees' => count($debugInfo['settersEmployeeNames']),
+            'totalConfirmersEmployees' => count($debugInfo['confirmersEmployeeNames']),
+            'totalTimesheetEmployees' => count($timesheetEmployees),
+            'totalSettersHoursEntries' => count($settersTimesheetEmployees),
+            'totalConfirmersHoursEntries' => count($confirmersTimesheetEmployees),
+            'totalSettersHoursEntries' => count($responseData['settersHours']),
+            'totalConfirmersHoursEntries' => count($responseData['confirmersHours']),
+            'settersInHoursArray' => $settersInHours,
+            'confirmersInHoursArray' => $confirmersInHours,
+            'unknownInHoursArray' => $unknownInHours,
+            'mismatches' => $mismatches,
+            'mismatchCount' => count($mismatches),
+            'problem' => count($mismatches) > 0 ? 'MISMATCHES_FOUND' : ($confirmersInHours > 0 ? 'CONFIRMERS_FOUND_IN_HOURS_ARRAY' : 'OK'),
+            'note' => count($mismatches) > 0 ? 'Employees clocked in as Confirmer found in setters hours array (should not happen with operational unit filtering)' : 'Hours array now filtered by operational unit - only Setter operational unit employees appear'
+        ];
+        
+        // Add debug info to response
+        $responseData['_debug'] = $debugInfo;
+
+        // Get unique employee names for setters, confirmers, and IPP
         $settersEmployeeNames = [];
         $confirmersEmployeeNames = [];
+        $ippEmployeeNames = [];
         
         foreach($settersCalls as $call){
             $employeeName = $call['FirstName'] . " " . $call['LastName'];
@@ -311,6 +702,17 @@ $holidays = [
                 $confirmersEmployeeNames[] = $employeeName;
             }
         }
+        
+        // Get IPP employee names from IPP hours array
+        foreach($ippTimesheetEmployees as $empData){
+            $employeeName = $empData['employee'] ?? null;
+            if($employeeName && !in_array($employeeName, $ippEmployeeNames)){
+                $ippEmployeeNames[] = $employeeName;
+            }
+        }
+        
+        // Add IPPEmployees to response
+        $responseData['IPPEmployees'] = $ippEmployeeNames;
 
         // Query scorecards for setters and confirmers
         $integrityDB = new db(
@@ -469,18 +871,25 @@ $holidays = [
     // Fetch secondary data for performance metrics if secondaryDateRange is provided
     $responseData['secondarySettersCalls'] = [];
     $responseData['secondaryConfirmersCalls'] = [];
-    $responseData['secondaryHours'] = [];
+    $responseData['secondaryIPPCalls'] = [];
+    $responseData['secondarySettersHours'] = [];
+    $responseData['secondaryConfirmersHours'] = [];
+    $responseData['secondaryIPPHours'] = [];
     $responseData['secondarySettersScorecards'] = [];
     $responseData['secondaryConfirmersScorecards'] = [];
     
     if(array_key_exists('secondaryDateRange', $_GET)){
         // Fetch secondary setters calls
-        $secondarySettersCallsQuery = "SELECT emp_user_12, LastName, cls_Calls.id as id, FirstName, CallDate, ResultCode, cty_id, Connected, Pitched, Positive, qualified, lds_Leads.ApptSet, lds_Leads.Issued FROM cls_Calls LEFT JOIN clr_CallResults ON ResultCode = clr_CallResults.id LEFT JOIN emp_Employees ON emp_id = emp_Employees.id LEFT JOIN lds_Leads ON cls_Calls.lds_id = lds_Leads.id LEFT JOIN srs_SourceSubs ON lds_Leads.srs_id = srs_SourceSubs.id WHERE CallDate BETWEEN '$secondaryStart' AND '$secondaryEnd' AND ResultCode NOT LIKE '%ND%' AND Dialer = 'True' AND emp_user_12 > 0 AND cty_id != 'C'";
+        $secondarySettersCallsQuery = "SELECT emp_user_12, LastName, cls_Calls.id as id, FirstName, CallDate, ResultCode, cty_id, Connected, Pitched, Positive, qualified, lds_Leads.ApptSet, lds_Leads.Issued FROM cls_Calls LEFT JOIN clr_CallResults ON ResultCode = clr_CallResults.id LEFT JOIN emp_Employees ON emp_id = emp_Employees.id LEFT JOIN lds_Leads ON cls_Calls.lds_id = lds_Leads.id LEFT JOIN srs_SourceSubs ON lds_Leads.srs_id = srs_SourceSubs.id WHERE CallDate BETWEEN '$secondaryStart' AND '$secondaryEnd' AND ResultCode NOT LIKE '%ND%' AND Dialer = 'True' AND emp_user_12 > 0 AND cty_id NOT IN ('C', 'IPP')";
         $secondarySettersCalls = curlCall("$endpoint/lp/customReport.php?rptSQL=" . urlencode($secondarySettersCallsQuery));
 
         // Fetch secondary confirmers calls
         $secondaryConfirmersCallsQuery = "SELECT emp_user_12, LastName, cls_Calls.id as id, FirstName, CallDate, ResultCode, cty_id, Connected, Pitched, Positive, qualified, lds_Leads.ApptSet, lds_Leads.Issued FROM cls_Calls LEFT JOIN clr_CallResults ON ResultCode = clr_CallResults.id LEFT JOIN emp_Employees ON emp_id = emp_Employees.id LEFT JOIN lds_Leads ON cls_Calls.lds_id = lds_Leads.id LEFT JOIN srs_SourceSubs ON lds_Leads.srs_id = srs_SourceSubs.id WHERE CallDate BETWEEN '$secondaryStart' AND '$secondaryEnd' AND ResultCode NOT LIKE '%ND%' AND Dialer = 'True' AND emp_user_12 > 0 AND cty_id = 'C'";
         $secondaryConfirmersCalls = curlCall("$endpoint/lp/customReport.php?rptSQL=" . urlencode($secondaryConfirmersCallsQuery));
+
+        // Fetch secondary IPP calls
+        $secondaryIPPCallsQuery = "SELECT emp_user_12, LastName, cls_Calls.id as id, FirstName, CallDate, ResultCode, cty_id, Connected, Pitched, Positive, qualified, lds_Leads.ApptSet, lds_Leads.Issued FROM cls_Calls LEFT JOIN clr_CallResults ON ResultCode = clr_CallResults.id LEFT JOIN emp_Employees ON emp_id = emp_Employees.id LEFT JOIN lds_Leads ON cls_Calls.lds_id = lds_Leads.id LEFT JOIN srs_SourceSubs ON lds_Leads.srs_id = srs_SourceSubs.id WHERE CallDate BETWEEN '$secondaryStart' AND '$secondaryEnd' AND ResultCode NOT LIKE '%ND%' AND Dialer = 'True' AND emp_user_12 > 0 AND cty_id = 'IPP'";
+        $secondaryIPPCalls = curlCall("$endpoint/lp/customReport.php?rptSQL=" . urlencode($secondaryIPPCallsQuery));
 
         // Get deputy IDs for secondary data
         $secondaryDeputyIDs = [];
@@ -497,23 +906,73 @@ $holidays = [
 
         // Fetch timesheets for secondary date range
         $secondaryTimesheetEmployees = [];
+        $secondarySettersTimesheetEmployees = []; // Hours for employees clocked into Setter operational unit
+        $secondaryConfirmersTimesheetEmployees = []; // Hours for employees clocked into Confirmer operational unit
+        $secondaryIPPTimesheetEmployees = []; // Hours for employees clocked into IPP Dialing - Office operational unit
         foreach($secondaryDeputyIDs as $deputyID){
             $theseTimesheets = curlCall("$endpoint/deputy/getTimesheets.php?startDate=$secondaryStart&endDate=$secondaryEnd&id=" . intval($deputyID));
             foreach($theseTimesheets as $timesheet){
+                // Determine if this timesheet is for a setter, confirmer, or IPP based on operational unit
+                $operationalUnitName = null;
+                if(isset($timesheet['_DPMetaData']['OperationalUnitInfo']['OperationalUnitName'])){
+                    $operationalUnitName = $timesheet['_DPMetaData']['OperationalUnitInfo']['OperationalUnitName'];
+                }
+                
+                $isSetterOperationalUnit = $operationalUnitName === 'Setter';
+                $isConfirmerOperationalUnit = $operationalUnitName && (
+                    $operationalUnitName === 'Confirmer' || 
+                    $operationalUnitName === 'Confirmer - Office' ||
+                    stripos($operationalUnitName, 'Confirmer') !== false
+                );
+                $isIPPOperationalUnit = $operationalUnitName && (
+                    $operationalUnitName === 'IPP Dialing - Office' ||
+                    stripos($operationalUnitName, 'IPP Dialing') !== false
+                );
+                
                 if($timesheet['IsInProgress']){
                     $timesheet['EndTimeLocalized'] = date('Y-m-d H:i:s');
                 }
                 $employeeID = $timesheet['Employee'];
+                
+                // Calculate hours for this timesheet
+                $hoursToAdd = 0;
+                if($timesheet['IsInProgress'] && isset($timesheet['StartTimeLocalized'])){
+                    $currentTime = date('Y-m-d H:i:s');
+                    $hoursToAdd = (strtotime($currentTime) - strtotime($timesheet['StartTimeLocalized'])) / 60 / 60;
+                }else if(isset($timesheet['TotalTime']) && $timesheet['TotalTime'] !== '' && $timesheet['TotalTime'] !== null){
+                    $hoursToAdd = floatval($timesheet['TotalTime']);
+                }else if(isset($timesheet['StartTimeLocalized']) && isset($timesheet['EndTimeLocalized'])){
+                    $hoursToAdd = (strtotime($timesheet['EndTimeLocalized']) - strtotime($timesheet['StartTimeLocalized'])) / 60 / 60;
+                }
+                
+                // Add to general secondaryTimesheetEmployees (for backward compatibility)
                 if(!array_key_exists($employeeID, $secondaryTimesheetEmployees)){
                     $secondaryTimesheetEmployees[$employeeID] = ['hours' => 0];
                 }
-                if($timesheet['IsInProgress'] && isset($timesheet['StartTimeLocalized'])){
-                    $currentTime = date('Y-m-d H:i:s');
-                    $secondaryTimesheetEmployees[$employeeID]['hours'] += (strtotime($currentTime) - strtotime($timesheet['StartTimeLocalized'])) / 60 / 60;
-                }else if(isset($timesheet['TotalTime']) && $timesheet['TotalTime'] !== '' && $timesheet['TotalTime'] !== null){
-                    $secondaryTimesheetEmployees[$employeeID]['hours'] += floatval($timesheet['TotalTime']);
-                }else if(isset($timesheet['StartTimeLocalized']) && isset($timesheet['EndTimeLocalized'])){
-                    $secondaryTimesheetEmployees[$employeeID]['hours'] += (strtotime($timesheet['EndTimeLocalized']) - strtotime($timesheet['StartTimeLocalized'])) / 60 / 60;
+                $secondaryTimesheetEmployees[$employeeID]['hours'] += $hoursToAdd;
+                
+                // Add to setter-specific hours if operational unit is Setter
+                if($isSetterOperationalUnit){
+                    if(!array_key_exists($employeeID, $secondarySettersTimesheetEmployees)){
+                        $secondarySettersTimesheetEmployees[$employeeID] = ['hours' => 0];
+                    }
+                    $secondarySettersTimesheetEmployees[$employeeID]['hours'] += $hoursToAdd;
+                }
+                
+                // Add to confirmer-specific hours if operational unit is Confirmer
+                if($isConfirmerOperationalUnit){
+                    if(!array_key_exists($employeeID, $secondaryConfirmersTimesheetEmployees)){
+                        $secondaryConfirmersTimesheetEmployees[$employeeID] = ['hours' => 0];
+                    }
+                    $secondaryConfirmersTimesheetEmployees[$employeeID]['hours'] += $hoursToAdd;
+                }
+                
+                // Add to IPP-specific hours if operational unit is IPP Dialing - Office
+                if($isIPPOperationalUnit){
+                    if(!array_key_exists($employeeID, $secondaryIPPTimesheetEmployees)){
+                        $secondaryIPPTimesheetEmployees[$employeeID] = ['hours' => 0];
+                    }
+                    $secondaryIPPTimesheetEmployees[$employeeID]['hours'] += $hoursToAdd;
                 }
             }
         }
@@ -523,10 +982,16 @@ $holidays = [
             if(!array_key_exists(intval($call['emp_user_12']), $secondaryTimesheetEmployees)){
                 continue;
             }
-            $secondaryTimesheetEmployees[intval($call['emp_user_12'])]['employee'] = $call['FirstName'] . " " . $call['LastName'];
+            $employeeName = $call['FirstName'] . " " . $call['LastName'];
+            $employeeID = intval($call['emp_user_12']);
+            $secondaryTimesheetEmployees[$employeeID]['employee'] = $employeeName;
+            // Set employee name in setter-specific hours if they have setter hours
+            if(array_key_exists($employeeID, $secondarySettersTimesheetEmployees)){
+                $secondarySettersTimesheetEmployees[$employeeID]['employee'] = $employeeName;
+            }
             $responseData['secondarySettersCalls'][] = [
                 'id' => $call['id'],
-                'employee' => $call['FirstName'] . " " . $call['LastName'],
+                'employee' => $employeeName,
                 'date' => $call['CallDate'],
                 'result' => $call['ResultCode'],
                 'cty_id' => $call['cty_id'],
@@ -544,10 +1009,16 @@ $holidays = [
             if(!array_key_exists(intval($call['emp_user_12']), $secondaryTimesheetEmployees)){
                 continue;
             }
-            $secondaryTimesheetEmployees[intval($call['emp_user_12'])]['employee'] = $call['FirstName'] . " " . $call['LastName'];
+            $employeeName = $call['FirstName'] . " " . $call['LastName'];
+            $employeeID = intval($call['emp_user_12']);
+            $secondaryTimesheetEmployees[$employeeID]['employee'] = $employeeName;
+            // Set employee name in confirmer-specific hours if they have confirmer hours
+            if(array_key_exists($employeeID, $secondaryConfirmersTimesheetEmployees)){
+                $secondaryConfirmersTimesheetEmployees[$employeeID]['employee'] = $employeeName;
+            }
             $responseData['secondaryConfirmersCalls'][] = [
                 'id' => $call['id'],
-                'employee' => $call['FirstName'] . " " . $call['LastName'],
+                'employee' => $employeeName,
                 'date' => $call['CallDate'],
                 'result' => $call['ResultCode'],
                 'cty_id' => $call['cty_id'],
@@ -560,7 +1031,82 @@ $holidays = [
             ];
         }
 
-        $responseData['secondaryHours'] = array_values($secondaryTimesheetEmployees);
+        // Process secondary IPP calls
+        foreach($secondaryIPPCalls as $call){
+            if(!array_key_exists(intval($call['emp_user_12']), $secondaryTimesheetEmployees)){
+                continue;
+            }
+            $employeeName = $call['FirstName'] . " " . $call['LastName'];
+            $employeeID = intval($call['emp_user_12']);
+            $secondaryTimesheetEmployees[$employeeID]['employee'] = $employeeName;
+            // Set employee name in IPP-specific hours if they have IPP hours
+            if(array_key_exists($employeeID, $secondaryIPPTimesheetEmployees)){
+                $secondaryIPPTimesheetEmployees[$employeeID]['employee'] = $employeeName;
+            }
+            $responseData['secondaryIPPCalls'][] = [
+                'id' => $call['id'],
+                'employee' => $employeeName,
+                'date' => $call['CallDate'],
+                'result' => $call['ResultCode'],
+                'cty_id' => $call['cty_id'],
+                'connected' => $call['Connected'],
+                'pitched' => $call['Pitched'],
+                'positive' => $call['Positive'],
+                'qualified' => ($call['qualified'] == 1 ? true : false),
+                'ApptSet' => $call['ApptSet'] ?? null,
+                'Issued' => $call['Issued'] ?? null,
+            ];
+        }
+        
+        // Set employee names for secondary setter hours (in case they have hours but no calls)
+        foreach($secondarySettersTimesheetEmployees as $empID => $empData){
+            if(!isset($empData['employee']) || empty($empData['employee'])){
+                // Try to get name from secondaryTimesheetEmployees
+                if(isset($secondaryTimesheetEmployees[$empID]['employee'])){
+                    $secondarySettersTimesheetEmployees[$empID]['employee'] = $secondaryTimesheetEmployees[$empID]['employee'];
+                } else {
+                    // Try to get name from secondary setters calls
+                    foreach($secondarySettersCalls as $call){
+                        if(intval($call['emp_user_12']) == $empID){
+                            $secondarySettersTimesheetEmployees[$empID]['employee'] = $call['FirstName'] . " " . $call['LastName'];
+                            break;
+                        }
+                    }
+                }
+            }
+        }
+        
+        // Set employee names for secondary IPP hours (in case they have hours but no calls)
+        foreach($secondaryIPPTimesheetEmployees as $empID => $empData){
+            if(!isset($empData['employee']) || empty($empData['employee'])){
+                // Try to get name from secondaryTimesheetEmployees
+                if(isset($secondaryTimesheetEmployees[$empID]['employee'])){
+                    $secondaryIPPTimesheetEmployees[$empID]['employee'] = $secondaryTimesheetEmployees[$empID]['employee'];
+                } else {
+                    // Try to get name from secondary setters calls
+                    foreach($secondarySettersCalls as $call){
+                        if(intval($call['emp_user_12']) == $empID){
+                            $secondaryIPPTimesheetEmployees[$empID]['employee'] = $call['FirstName'] . " " . $call['LastName'];
+                            break;
+                        }
+                    }
+                    // If still not found, try secondary confirmers calls
+                    if(!isset($secondaryIPPTimesheetEmployees[$empID]['employee'])){
+                        foreach($secondaryConfirmersCalls as $call){
+                            if(intval($call['emp_user_12']) == $empID){
+                                $secondaryIPPTimesheetEmployees[$empID]['employee'] = $call['FirstName'] . " " . $call['LastName'];
+                                break;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // Use setter-specific hours array (based on operational unit) for secondary setters dashboard
+        $responseData['secondarySettersHours'] = array_values($secondarySettersTimesheetEmployees);
+        $responseData['secondaryConfirmersHours'] = array_values($secondaryConfirmersTimesheetEmployees);
+        $responseData['secondaryIPPHours'] = array_values($secondaryIPPTimesheetEmployees);
 
         // Fetch secondary scorecards
         $secondaryQueryEndDate = date('Y-m-d', strtotime($secondaryEnd . ' -1 day'));

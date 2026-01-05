@@ -10,9 +10,10 @@ interface EmployeeIndicatorProps {
   conversions: number
   hours?: number
   horsepower?: number
+  ippMode?: boolean
 }
 
-export function EmployeeIndicator({ name, dials, connections, pitches, conversions, hours, horsepower }: EmployeeIndicatorProps) {
+export function EmployeeIndicator({ name, dials, connections, pitches, conversions, hours, horsepower, ippMode = false }: EmployeeIndicatorProps) {
 
   return (
     <Card className="p-4">

@@ -198,7 +198,7 @@ const formatEmployeeSelectionText = (selectedEmployees: string[]): string => {
 const serializeFilterState = (
   selectedEmployees: string[],
   timePeriod: string,
-  dashboardType: "setters" | "confirmers",
+  dashboardType: "setters" | "confirmers" | "ipp",
   confirmedDateRange: { from: Date | undefined; to?: Date | undefined },
   confirmedTimeRange: { startHour: number | undefined; endHour: number | undefined },
   secondaryTimePeriod: string,
@@ -235,7 +235,7 @@ const serializeFilterState = (
 const deserializeFilterState = (stored: FilterState): {
   selectedEmployees: string[]
   timePeriod: string
-  dashboardType: "setters" | "confirmers"
+  dashboardType: "setters" | "confirmers" | "ipp"
   confirmedDateRange: { from: Date | undefined; to?: Date | undefined }
   confirmedTimeRange: { startHour: number | undefined; endHour: number | undefined }
   secondaryTimePeriod: string
@@ -272,7 +272,7 @@ const buildApiUrl = (
   secondaryDateRange?: string,
   secondaryCustomRange?: { from: Date | undefined; to?: Date | undefined }
 ) => {
-  const baseUrl = 'https://api.integrityprodserver.com/dashboards/ccHorsepower.php'
+  const baseUrl = 'https://api.integrityprodserver.com/dashboards/ccHorsepowerTest.php'
   const params = new URLSearchParams({ dateRange })
   
   if (dateRange === 'Custom Dates' && customRange?.from && customRange?.to) {
@@ -302,16 +302,20 @@ const buildApiUrl = (
 const transformApiData = (
   apiData: any, 
   selectedEmployees: string[], 
-  dashboardType: 'setters' | 'confirmers',
+  dashboardType: 'setters' | 'confirmers' | 'ipp',
   timeRange?: { startHour: number | undefined; endHour: number | undefined }
 ) => {
   // Use the appropriate calls array based on dashboard type
-  const callsKey = dashboardType === 'setters' ? 'settersCalls' : 'confirmersCalls'
+  const callsKey = dashboardType === 'setters' ? 'settersCalls' : dashboardType === 'confirmers' ? 'confirmersCalls' : 'ippCalls'
   const allCalls = apiData[callsKey] || []
   
   // Get scorecards based on dashboard type
-  const scorecardsKey = dashboardType === 'setters' ? 'settersScorecards' : 'confirmersScorecards'
+  const scorecardsKey = dashboardType === 'setters' ? 'settersScorecards' : dashboardType === 'confirmers' ? 'confirmersScorecards' : 'settersScorecards' // IPP doesn't have scorecards yet
   const allScorecards = apiData[scorecardsKey] || []
+  
+  // Get hours based on dashboard type
+  const hoursKey = dashboardType === 'setters' ? 'settersHours' : dashboardType === 'confirmers' ? 'confirmersHours' : 'IPPHours'
+  const allHours = apiData[hoursKey] || []
   
   // Keep team-wide STL data (checkout to dial time is a TEAM metric)
   const teamStl = apiData.stl || []
@@ -338,18 +342,19 @@ const transformApiData = (
   
   // Filter data by employee if employees are selected
   let filteredCalls = timeFilteredCalls
-  let filteredHours = apiData.hours || []
+  let filteredHours = allHours
   let filteredScorecards = allScorecards
   
   if (selectedEmployees.length > 0) {
     filteredCalls = timeFilteredCalls.filter((call: any) => selectedEmployees.includes(call.employee))
-    filteredHours = apiData.hours?.filter((h: any) => selectedEmployees.includes(h.employee)) || []
+    filteredHours = allHours.filter((h: any) => selectedEmployees.includes(h.employee))
     filteredScorecards = allScorecards.filter((scorecard: any) => selectedEmployees.includes(scorecard.employee))
   }
   
-  // Calculate metrics from raw call data
+  // Calculate metrics from calls and hours for all dashboard types
   const employees = new Map()
   const callsByEmployee = new Map()
+  const hoursByEmployee = new Map<string, number>()
   
   // Aggregate calls by employee
   filteredCalls.forEach((call: any) => {
@@ -360,7 +365,6 @@ const transformApiData = (
   })
   
   // Create a map of hours by employee name
-  const hoursByEmployee = new Map<string, number>()
   filteredHours.forEach((h: any) => {
     if (h.employee) {
       let adjustedHours = h.hours || 0
@@ -384,8 +388,8 @@ const transformApiData = (
     const positive = calls.filter((c: any) => c.positive === 1).length
     const hours = hoursByEmployee.get(employeeName) || 0
     
-    // Calculate horsepower per employee using the same formula as team metric
-    const horsepower = dials > 0 && hours > 0
+    // Calculate horsepower per employee using the same formula as team metric (only for setters)
+    const horsepower = dashboardType === 'setters' && dials > 0 && hours > 0
       ? Math.round(
           ((dials - connected) + 
           ((connected - pitched) * 1.5) + 
@@ -403,6 +407,22 @@ const transformApiData = (
       horsepower: horsepower,
     })
   })
+  
+  // For IPP dashboard, also add employees from hours even if they have no calls
+  if (dashboardType === 'ipp') {
+    hoursByEmployee.forEach((hours, employeeName) => {
+      if (!employees.has(employeeName)) {
+        employees.set(employeeName, {
+          dials: 0,
+          connections: 0,
+          conversions: 0,
+          pitches: 0,
+          hours: hours,
+          horsepower: 0,
+        })
+      }
+    })
+  }
   
   // Calculate overall metrics
   const totalCalls = filteredCalls.length
@@ -424,7 +444,7 @@ const transformApiData = (
   const totalIssued = filteredCalls.filter((c: any) => c.Issued != null && c.Issued > 0).length
   
   // Calculate total hours (using adjusted hours if time range is provided)
-  const totalHours = Array.from(hoursByEmployee.values()).reduce((sum: number, hours: number) => sum + hours, 0)
+  const totalHours: number = Array.from(hoursByEmployee.values()).reduce((sum: number, hours: number) => sum + hours, 0)
   
   // Calculate average STL (checkout to dial time) in seconds - TEAM metric only
   // Only include STL values greater than 0 in the average
@@ -548,7 +568,7 @@ export function DashboardContent() {
   const [timePeriod, setTimePeriod] = useState("Today")
   const [selectedEmployees, setSelectedEmployees] = useState<string[]>([])
   const [employeeSelectOpen, setEmployeeSelectOpen] = useState(false)
-  const [dashboardType, setDashboardType] = useState<"setters" | "confirmers">("setters")
+  const [dashboardType, setDashboardType] = useState<"setters" | "confirmers" | "ipp">("setters")
   const [isMenuOpen, setIsMenuOpen] = useState(false)
   const [showLogoutDialog, setShowLogoutDialog] = useState(false)
   const [customDateRange, setCustomDateRange] = useState<{ from: Date | undefined; to?: Date | undefined }>({ 
@@ -648,7 +668,9 @@ export function DashboardContent() {
     {
       settersCalls: rawData.secondarySettersCalls || [],
       confirmersCalls: rawData.secondaryConfirmersCalls || [],
-      hours: rawData.secondaryHours || [],
+      settersHours: rawData.secondarySettersHours || [],
+      confirmersHours: rawData.secondaryConfirmersHours || [],
+      IPPHours: rawData.secondaryIPPHours || [],
       settersScorecards: rawData.secondarySettersScorecards || [],
       confirmersScorecards: rawData.secondaryConfirmersScorecards || [],
       stl: [], // STL is team-wide, not needed for secondary metrics
@@ -658,17 +680,31 @@ export function DashboardContent() {
     secondaryConfirmedTimeRange
   ) : null
 
-  // Get unique employees from the appropriate calls array based on dashboard type
+  // Get unique employees from the appropriate calls array or hours array based on dashboard type
   const availableEmployees = rawData ? (() => {
-    const callsKey = dashboardType === 'setters' ? 'settersCalls' : 'confirmersCalls'
-    const calls = rawData[callsKey] || []
-    const uniqueEmployees = new Set<string>()
-    calls.forEach((call: any) => {
-      if (call.employee) {
-        uniqueEmployees.add(call.employee)
-      }
-    })
-    return Array.from(uniqueEmployees).sort()
+    if (dashboardType === 'ipp') {
+      // For IPP, get employees from IPPEmployees array or IPPHours
+      const ippEmployees = rawData.IPPEmployees || []
+      const ippHours = rawData.IPPHours || []
+      const uniqueEmployees = new Set<string>()
+      ippEmployees.forEach((emp: string) => uniqueEmployees.add(emp))
+      ippHours.forEach((h: any) => {
+        if (h.employee) {
+          uniqueEmployees.add(h.employee)
+        }
+      })
+      return Array.from(uniqueEmployees).sort()
+    } else {
+      const callsKey = dashboardType === 'setters' ? 'settersCalls' : 'confirmersCalls'
+      const calls = rawData[callsKey] || []
+      const uniqueEmployees = new Set<string>()
+      calls.forEach((call: any) => {
+        if (call.employee) {
+          uniqueEmployees.add(call.employee)
+        }
+      })
+      return Array.from(uniqueEmployees).sort()
+    }
   })() : []
 
   // Auto-reset employee filter if selected employees don't exist in current data
@@ -979,7 +1015,8 @@ export function DashboardContent() {
   const totalHoursForDialsPerHour = rawData ? (() => {
     if (dashboardType !== 'setters') return 0
     
-    let filteredHours = rawData.hours || []
+    const hoursKey = dashboardType === 'setters' ? 'settersHours' : dashboardType === 'confirmers' ? 'confirmersHours' : 'IPPHours'
+    let filteredHours = rawData[hoursKey] || []
     
     // Filter by employee if employees are selected
     if (selectedEmployees.length > 0) {
@@ -1138,6 +1175,14 @@ export function DashboardContent() {
                 className="min-w-[120px] dark:border-white/10"
               >
                 Confirmers
+              </Button>
+              <Button
+                variant={dashboardType === "ipp" ? "default" : "outline"}
+                onClick={() => setDashboardType("ipp")}
+                size="sm"
+                className="min-w-[120px] dark:border-white/10"
+              >
+                IPP
               </Button>
             </div>
             <div className="flex gap-2 justify-evenly md:justify-start">
@@ -1415,7 +1460,11 @@ export function DashboardContent() {
           </div>
         </Card>
 
-        {dashboardType === "setters" ? (
+        {dashboardType === "ipp" ? (
+          <>
+            {/* IPP Dashboard - Only show employees for now */}
+          </>
+        ) : dashboardType === "setters" ? (
           <>
             {/* Featured Metrics */}
             {!data ? (
@@ -2059,6 +2108,7 @@ export function DashboardContent() {
                   conversions={employee.conversions}
                   hours={employee.hours}
                   horsepower={dashboardType === 'setters' ? employee.horsepower : undefined}
+                  ippMode={dashboardType === 'ipp'}
                 />
               ))}
             </div>
