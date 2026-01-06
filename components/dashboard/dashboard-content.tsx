@@ -1906,15 +1906,15 @@ export function DashboardContent() {
                         value={secondaryData.settersMetrics.scoreCard}
                         max={100}
                         target={90}
-                        color={getGaugeColor(secondaryData.settersMetrics.scoreCard, [69, 79, 89, 99])}
+                        color={getGaugeColor(secondaryData.settersMetrics.scoreCard, [59.9, 69.9, 79.9, 89.9])}
                         unit="%"
                         size="small"
                         ranges={[
-                          { label: "Bad", min: 0, max: 69, color: "#ef4444" },
-                          { label: "Average", min: 70, max: 79, color: "#f97316" },
-                          { label: "Good", min: 80, max: 89, color: "#eab308" },
-                          { label: "Excellent", min: 90, max: 99, color: "#22c55e" },
-                          { label: "Elite", min: 100, max: 100, color: "#3b82f6" },
+                          { label: "Bad", min: 0, max: 59.9, color: "#ef4444" },
+                          { label: "Average", min: 60, max: 69.9, color: "#f97316" },
+                          { label: "Good", min: 70, max: 79.9, color: "#eab308" },
+                          { label: "Excellent", min: 80, max: 89.9, color: "#22c55e" },
+                          { label: "Elite", min: 90, max: 100, color: "#3b82f6" },
                         ]}
                         formula="(Sum of actualTotals ÷ Sum of maxTotals) × 100"
                       />
