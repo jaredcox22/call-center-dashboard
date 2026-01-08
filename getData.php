@@ -451,15 +451,29 @@ if ($_SERVER['REQUEST_METHOD'] == 'OPTIONS') {
 			$startDate = date('Y-m-d', strtotime("$startDate + 1 day"));
 			$startDOW = date('w', strtotime($startDate));
 			while($startDOW != $endDOW){
-				//Difference is greater than 1 day
+				//Difference is greater than 1 day - add full business hours for this day
 				if(array_key_exists($startDOW, $ccHours)){
-					$difference += strtotime("$startDate " . $ccHours[$startDOW]['start']) - strtotime("$startDate " . $ccHours[$startDOW]['end']);
+					$difference += strtotime("$startDate " . $ccHours[$startDOW]['end']) - strtotime("$startDate " . $ccHours[$startDOW]['start']);
 				}
 				$startDate = date('Y-m-d', strtotime("$startDate + 1 day"));
 				$startDOW = date('w', strtotime($startDate));         
 			}
 			if(array_key_exists($endDOW, $ccHours)){
-				$difference += strtotime($end) - strtotime("$endDate " . $ccHours[$endDOW]['start']);
+				// Calculate time from start of business to call time
+				$endDayStart = strtotime("$endDate " . $ccHours[$endDOW]['start']);
+				$endDayEnd = strtotime("$endDate " . $ccHours[$endDOW]['end']);
+				$endTime = strtotime($end);
+				
+				if($endTime <= $endDayStart){
+					// Call was before business hours started - add nothing (call was "at" start of day)
+					// No additional time to add
+				}else if($endTime >= $endDayEnd){
+					// Call was after business hours ended - cap at full business day
+					$difference += $endDayEnd - $endDayStart;
+				}else{
+					// Call was during business hours
+					$difference += $endTime - $endDayStart;
+				}
 			}
 		}
 		if($difference < 0){
