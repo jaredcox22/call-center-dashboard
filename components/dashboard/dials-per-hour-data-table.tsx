@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useMemo } from "react"
+import { useState, useMemo, useCallback } from "react"
 import {
   Dialog,
   DialogContent,
@@ -23,6 +23,12 @@ import { format } from "date-fns"
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible"
 import { Card } from "@/components/ui/card"
+import {
+  SelectionCheckbox,
+  SelectAllCheckbox,
+  ExcludeRowButton,
+  ExcludeSelectedButton,
+} from "./table-row-selection"
 
 /**
  * Formats a date string to a readable format
@@ -48,30 +54,56 @@ interface DialsPerHourDataTableProps {
   totalHours: number
   open: boolean
   onOpenChange: (open: boolean) => void
+  excludedIds?: Set<string>
+  onExcludeRecords?: (recordIds: string[]) => void
 }
 
 type SortField = "employee" | "date" | "id"
 type SortDirection = "asc" | "desc" | null
 
-export function DialsPerHourDataTable({ data, totalHours, open, onOpenChange }: DialsPerHourDataTableProps) {
+export function DialsPerHourDataTable({ 
+  data, 
+  totalHours, 
+  open, 
+  onOpenChange,
+  excludedIds = new Set(),
+  onExcludeRecords,
+}: DialsPerHourDataTableProps) {
   const [searchQuery, setSearchQuery] = useState("")
   const [sortField, setSortField] = useState<SortField>("date")
   const [sortDirection, setSortDirection] = useState<SortDirection>("desc")
   const [isInfoOpen, setIsInfoOpen] = useState(false)
+  const [selectedRows, setSelectedRows] = useState<Set<string>>(new Set())
 
-  // Calculate summary stats
+  // Get record ID for exclusion
+  const getRecordId = (record: DialsPerHourRecord): string => {
+    return record.id?.toString() ?? ""
+  }
+
+  // Calculate summary stats (from non-excluded data)
   const summaryStats = useMemo(() => {
-    const totalDials = data.length
+    const nonExcludedData = data.filter((record) => {
+      const recordId = getRecordId(record)
+      return recordId && !excludedIds.has(recordId)
+    })
+    const totalDials = nonExcludedData.length
     
     return {
       totalDials,
       totalHours,
     }
-  }, [data, totalHours])
+  }, [data, totalHours, excludedIds])
 
   // Filter and sort data
   const filteredAndSortedData = useMemo(() => {
+    // First filter out excluded records
     let filtered = data.filter((record) => {
+      const recordId = getRecordId(record)
+      return recordId && !excludedIds.has(recordId)
+    })
+
+    // Then apply search filter
+    filtered = filtered.filter((record) => {
       const query = searchQuery.toLowerCase()
       return (
         (record.employee?.toLowerCase() ?? "").includes(query) ||
@@ -109,7 +141,15 @@ export function DialsPerHourDataTable({ data, totalHours, open, onOpenChange }: 
     }
 
     return filtered
-  }, [data, searchQuery, sortField, sortDirection])
+  }, [data, searchQuery, sortField, sortDirection, excludedIds])
+
+  // Clear selection when dialog closes
+  const handleOpenChange = useCallback((newOpen: boolean) => {
+    if (!newOpen) {
+      setSelectedRows(new Set())
+    }
+    onOpenChange(newOpen)
+  }, [onOpenChange])
 
   const handleSort = (field: SortField) => {
     if (sortField === field) {
@@ -138,8 +178,61 @@ export function DialsPerHourDataTable({ data, totalHours, open, onOpenChange }: 
     )
   }
 
+  // Selection handlers
+  const handleSelectAll = useCallback((checked: boolean) => {
+    if (checked) {
+      const allIds = new Set(
+        filteredAndSortedData
+          .map((record) => getRecordId(record))
+          .filter((id) => id !== "")
+      )
+      setSelectedRows(allIds)
+    } else {
+      setSelectedRows(new Set())
+    }
+  }, [filteredAndSortedData])
+
+  const handleSelectRow = useCallback((recordId: string, checked: boolean) => {
+    setSelectedRows((prev) => {
+      const next = new Set(prev)
+      if (checked) {
+        next.add(recordId)
+      } else {
+        next.delete(recordId)
+      }
+      return next
+    })
+  }, [])
+
+  const handleExcludeSelected = useCallback(() => {
+    if (onExcludeRecords && selectedRows.size > 0) {
+      onExcludeRecords(Array.from(selectedRows))
+      setSelectedRows(new Set())
+    }
+  }, [onExcludeRecords, selectedRows])
+
+  const handleExcludeRow = useCallback((recordId: string) => {
+    if (onExcludeRecords) {
+      onExcludeRecords([recordId])
+    }
+  }, [onExcludeRecords])
+
+  // Determine select all checkbox state
+  const selectAllState = useMemo(() => {
+    const selectableIds = filteredAndSortedData
+      .map((record) => getRecordId(record))
+      .filter((id) => id !== "")
+    
+    if (selectableIds.length === 0) return false
+    
+    const selectedCount = selectableIds.filter((id) => selectedRows.has(id)).length
+    if (selectedCount === 0) return false
+    if (selectedCount === selectableIds.length) return true
+    return "indeterminate" as const
+  }, [filteredAndSortedData, selectedRows])
+
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
+    <Dialog open={open} onOpenChange={handleOpenChange}>
       <DialogContent className="max-w-[95vw] lg:max-w-7xl max-h-[90vh] overflow-hidden flex flex-col p-0 gap-0">
         <DialogHeader className="px-6 pt-6 pb-4">
           <DialogTitle>Dials Per Hour - Data Table</DialogTitle>
@@ -195,7 +288,7 @@ export function DialsPerHourDataTable({ data, totalHours, open, onOpenChange }: 
             </Alert>
           </Collapsible>
 
-          {/* Search Input */}
+          {/* Search Input and Actions */}
           <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
             <Input
               placeholder="Search by employee, date, or call ID..."
@@ -203,8 +296,16 @@ export function DialsPerHourDataTable({ data, totalHours, open, onOpenChange }: 
               onChange={(e) => setSearchQuery(e.target.value)}
               className="w-full"
             />
-            <div className="text-sm text-muted-foreground whitespace-nowrap text-center sm:text-left">
-              {filteredAndSortedData.length} of {data.length} records
+            <div className="flex items-center gap-2">
+              {onExcludeRecords && (
+                <ExcludeSelectedButton
+                  selectedCount={selectedRows.size}
+                  onClick={handleExcludeSelected}
+                />
+              )}
+              <div className="text-sm text-muted-foreground whitespace-nowrap text-center sm:text-left">
+                {filteredAndSortedData.length} of {data.length} records
+              </div>
             </div>
           </div>
 
@@ -213,6 +314,14 @@ export function DialsPerHourDataTable({ data, totalHours, open, onOpenChange }: 
             <Table>
               <TableHeader className="sticky top-0 bg-background z-10">
                 <TableRow>
+                  {onExcludeRecords && (
+                    <TableHead className="w-[50px]">
+                      <SelectAllCheckbox
+                        checked={selectAllState}
+                        onCheckedChange={handleSelectAll}
+                      />
+                    </TableHead>
+                  )}
                   <TableHead className="min-w-[120px] sm:min-w-[150px]">
                     <Button
                       variant="ghost"
@@ -246,29 +355,55 @@ export function DialsPerHourDataTable({ data, totalHours, open, onOpenChange }: 
                       {getSortIcon("id")}
                     </Button>
                   </TableHead>
+                  {onExcludeRecords && (
+                    <TableHead className="w-[50px]">Actions</TableHead>
+                  )}
                 </TableRow>
               </TableHeader>
               <TableBody>
                 {filteredAndSortedData.length === 0 ? (
                   <TableRow>
-                    <TableCell colSpan={3} className="text-center py-8 text-muted-foreground">
+                    <TableCell colSpan={onExcludeRecords ? 5 : 3} className="text-center py-8 text-muted-foreground">
                       {searchQuery ? "No records found matching your search." : "No data available."}
                     </TableCell>
                   </TableRow>
                 ) : (
-                  filteredAndSortedData.map((record) => (
-                    <TableRow key={record.id ? `dials-${record.id}` : `dials-${record.employee}-${record.date}`}>
-                      <TableCell className="min-w-[120px] font-medium">
-                        {record.employee || "N/A"}
-                      </TableCell>
-                      <TableCell className="text-sm text-muted-foreground min-w-[160px]">
-                        {formatDate(record.date)}
-                      </TableCell>
-                      <TableCell className="text-sm text-muted-foreground hidden sm:table-cell">
-                        {record.id ?? "N/A"}
-                      </TableCell>
-                    </TableRow>
-                  ))
+                  filteredAndSortedData.map((record) => {
+                    const recordId = getRecordId(record)
+                    const isSelected = recordId ? selectedRows.has(recordId) : false
+                    
+                    return (
+                      <TableRow key={record.id ? `dials-${record.id}` : `dials-${record.employee}-${record.date}`}>
+                        {onExcludeRecords && (
+                          <TableCell>
+                            <SelectionCheckbox
+                              checked={isSelected}
+                              onCheckedChange={(checked) => handleSelectRow(recordId, checked)}
+                              disabled={!recordId}
+                              ariaLabel={`Select call ${record.id}`}
+                            />
+                          </TableCell>
+                        )}
+                        <TableCell className="min-w-[120px] font-medium">
+                          {record.employee || "N/A"}
+                        </TableCell>
+                        <TableCell className="text-sm text-muted-foreground min-w-[160px]">
+                          {formatDate(record.date)}
+                        </TableCell>
+                        <TableCell className="text-sm text-muted-foreground hidden sm:table-cell">
+                          {record.id ?? "N/A"}
+                        </TableCell>
+                        {onExcludeRecords && (
+                          <TableCell>
+                            <ExcludeRowButton
+                              onClick={() => handleExcludeRow(recordId)}
+                              disabled={!recordId}
+                            />
+                          </TableCell>
+                        )}
+                      </TableRow>
+                    )
+                  })
                 )}
               </TableBody>
             </Table>

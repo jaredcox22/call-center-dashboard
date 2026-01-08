@@ -20,7 +20,10 @@ import { DialsPerHourDataTable } from "./dials-per-hour-data-table"
 import { ConversionQualifiedDataTable } from "./conversion-qualified-data-table"
 import { ConversionUnqualifiedDataTable } from "./conversion-unqualified-data-table"
 import { GrossIssueDataTable } from "./gross-issue-data-table"
-import { LogOut, RefreshCw, Moon, Sun, Menu, CalendarIcon, AlertCircle, Users, ChevronDown } from "lucide-react"
+import { ExcludedRecordsPanel } from "./excluded-records-panel"
+import { useExcludedRecords } from "@/hooks/use-excluded-records"
+import { LogOut, RefreshCw, Moon, Sun, Menu, CalendarIcon, AlertCircle, Users, ChevronDown, Ban } from "lucide-react"
+import { Badge } from "@/components/ui/badge"
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetTrigger } from "@/components/ui/sheet"
 import {
   AlertDialog,
@@ -315,15 +318,46 @@ const buildApiUrl = (
   return `${baseUrl}?${params.toString()}`
 }
 
+// Type for excluded record IDs by table type
+interface ExcludedIdsByTable {
+  stl: Set<string>
+  connection: Set<string>
+  pitch: Set<string>
+  conversion: Set<string>
+  dialsPerHour: Set<string>
+  grossIssue: Set<string>
+  conversionQualified: Set<string>
+  conversionUnqualified: Set<string>
+}
+
 const transformApiData = (
   apiData: any, 
   selectedEmployees: string[], 
   dashboardType: 'setters' | 'confirmers' | 'ipp',
-  timeRange?: { startHour: number | undefined; endHour: number | undefined }
+  timeRange?: { startHour: number | undefined; endHour: number | undefined },
+  excludedIds?: ExcludedIdsByTable
 ) => {
   // Use the appropriate calls array based on dashboard type
   const callsKey = dashboardType === 'setters' ? 'settersCalls' : dashboardType === 'confirmers' ? 'confirmersCalls' : 'ippCalls'
-  const allCalls = apiData[callsKey] || []
+  let allCalls = apiData[callsKey] || []
+  
+  // Filter out excluded records from calls (using call id)
+  // Note: Connection, Pitch, Conversion, DialsPerHour, GrossIssue all share the same call id
+  // We use a combined set of all excluded call IDs
+  if (excludedIds) {
+    const excludedCallIds = new Set([
+      ...excludedIds.connection,
+      ...excludedIds.pitch,
+      ...excludedIds.conversion,
+      ...excludedIds.dialsPerHour,
+      ...excludedIds.grossIssue,
+      ...excludedIds.conversionQualified,
+      ...excludedIds.conversionUnqualified,
+    ])
+    if (excludedCallIds.size > 0) {
+      allCalls = allCalls.filter((call: any) => !excludedCallIds.has(String(call.id)))
+    }
+  }
   
   // Get scorecards based on dashboard type
   const scorecardsKey = dashboardType === 'setters' ? 'settersScorecards' : dashboardType === 'confirmers' ? 'confirmersScorecards' : 'settersScorecards' // IPP doesn't have scorecards yet
@@ -334,7 +368,12 @@ const transformApiData = (
   const allHours = apiData[hoursKey] || []
   
   // Keep team-wide STL data (checkout to dial time is a TEAM metric)
-  const teamStl = apiData.stl || []
+  let teamStl = apiData.stl || []
+  
+  // Filter out excluded STL records (using leadId)
+  if (excludedIds && excludedIds.stl.size > 0) {
+    teamStl = teamStl.filter((stl: any) => !excludedIds.stl.has(String(stl.leadId)))
+  }
   
   // Filter data by time range if provided
   let timeFilteredCalls = allCalls
@@ -605,6 +644,16 @@ export function DashboardContent() {
   const [conversionQualifiedTableOpen, setConversionQualifiedTableOpen] = useState(false)
   const [conversionUnqualifiedTableOpen, setConversionUnqualifiedTableOpen] = useState(false)
   const [grossIssueTableOpen, setGrossIssueTableOpen] = useState(false)
+  const [excludedRecordsPanelOpen, setExcludedRecordsPanelOpen] = useState(false)
+  
+  // Excluded records hook - syncs with Firestore
+  const {
+    excludedRecords,
+    loading: excludedRecordsLoading,
+    getExcludedIdsForTable,
+    excludeRecords,
+    restoreByDocIds,
+  } = useExcludedRecords()
   
   // Time range state for primary date range
   const [customTimeRange, setCustomTimeRange] = useState<{ startHour: number | undefined; endHour: number | undefined }>({
@@ -679,7 +728,19 @@ export function DashboardContent() {
     dedupingInterval: 10000,
   })
 
-  const data = rawData ? transformApiData(rawData, selectedEmployees, dashboardType, confirmedTimeRange) : null
+  // Build excluded IDs object for transformApiData
+  const excludedIdsForTransform: ExcludedIdsByTable = {
+    stl: getExcludedIdsForTable("stl"),
+    connection: getExcludedIdsForTable("connection"),
+    pitch: getExcludedIdsForTable("pitch"),
+    conversion: getExcludedIdsForTable("conversion"),
+    dialsPerHour: getExcludedIdsForTable("dialsPerHour"),
+    grossIssue: getExcludedIdsForTable("grossIssue"),
+    conversionQualified: getExcludedIdsForTable("conversionQualified"),
+    conversionUnqualified: getExcludedIdsForTable("conversionUnqualified"),
+  }
+
+  const data = rawData ? transformApiData(rawData, selectedEmployees, dashboardType, confirmedTimeRange, excludedIdsForTransform) : null
   const secondaryData = rawData ? transformApiData(
     {
       settersCalls: rawData.secondarySettersCalls || [],
@@ -693,7 +754,8 @@ export function DashboardContent() {
     },
     selectedEmployees,
     dashboardType,
-    secondaryConfirmedTimeRange
+    secondaryConfirmedTimeRange,
+    excludedIdsForTransform
   ) : null
 
   // Get unique employees from the appropriate calls array or hours array based on dashboard type
@@ -1027,6 +1089,25 @@ export function DashboardContent() {
     id: call.id ?? null,
   }))
 
+  // Build available record IDs for filtering excluded records panel
+  const availableRecordIdsForPanel = {
+    stl: new Set<string>(filteredStlData.filter((r: any) => r.leadId != null).map((r: any) => String(r.leadId))),
+    connection: new Set<string>(connectionTableData.filter((r: any) => r.id != null).map((r: any) => String(r.id))),
+    pitch: new Set<string>(filteredConnectedCalls.filter((r: any) => r.id != null).map((r: any) => String(r.id))),
+    conversion: new Set<string>(filteredPitchedCalls.filter((r: any) => r.id != null).map((r: any) => String(r.id))),
+    dialsPerHour: new Set<string>(dialsPerHourTableData.filter((r: any) => r.id != null).map((r: any) => String(r.id))),
+    conversionQualified: new Set<string>(filteredSecondaryPitchedCalls.filter((r: any) => r.id != null).map((r: any) => String(r.id))),
+    conversionUnqualified: new Set<string>(filteredSecondaryPitchedCalls.filter((r: any) => r.id != null).map((r: any) => String(r.id))),
+    grossIssue: new Set<string>(filteredSecondaryGrossIssueCalls.filter((r: any) => r.id != null).map((r: any) => String(r.id))),
+  }
+
+  // Count excluded records that are relevant to the current time range
+  const relevantExcludedCount = excludedRecords.filter((record) => {
+    const availableIds = availableRecordIdsForPanel[record.tableType as keyof typeof availableRecordIdsForPanel]
+    if (!availableIds) return true
+    return availableIds.has(record.recordId)
+  }).length
+
   // Calculate total hours for dials per hour metric (same logic as in transformApiData)
   const totalHoursForDialsPerHour = rawData ? (() => {
     if (dashboardType !== 'setters') return 0
@@ -1116,6 +1197,22 @@ export function DashboardContent() {
             </Button>
             <Button variant="ghost" size="icon" onClick={() => mutate()}>
               <RefreshCw className="h-4 w-4" />
+            </Button>
+            <Button 
+              variant="ghost" 
+              size="icon" 
+              onClick={() => setExcludedRecordsPanelOpen(true)}
+              className="relative"
+            >
+              <Ban className="h-4 w-4" />
+              {relevantExcludedCount > 0 && (
+                <Badge 
+                  variant="destructive" 
+                  className="absolute -top-1.5 -right-1.5 min-w-[18px] h-[18px] px-1 flex items-center justify-center text-[10px] font-medium"
+                >
+                  {relevantExcludedCount > 999 ? "999+" : relevantExcludedCount}
+                </Badge>
+              )}
             </Button>
             
             {/* Desktop: Show logout button */}
@@ -2142,6 +2239,8 @@ export function DashboardContent() {
             data={filteredStlData}
             open={stlTableOpen}
             onOpenChange={setStlTableOpen}
+            excludedIds={getExcludedIdsForTable("stl")}
+            onExcludeRecords={(ids) => excludeRecords("stl", ids)}
           />
         </>
       )}
@@ -2153,40 +2252,64 @@ export function DashboardContent() {
             data={filteredPitchedCalls}
             open={conversionTableOpen}
             onOpenChange={setConversionTableOpen}
+            excludedIds={getExcludedIdsForTable("conversion")}
+            onExcludeRecords={(ids) => excludeRecords("conversion", ids)}
           />
           <PitchDataTable
             data={filteredConnectedCalls}
             open={pitchTableOpen}
             onOpenChange={setPitchTableOpen}
+            excludedIds={getExcludedIdsForTable("pitch")}
+            onExcludeRecords={(ids) => excludeRecords("pitch", ids)}
           />
           <ConnectionDataTable
             data={connectionTableData}
             open={connectionTableOpen}
             onOpenChange={setConnectionTableOpen}
+            excludedIds={getExcludedIdsForTable("connection")}
+            onExcludeRecords={(ids) => excludeRecords("connection", ids)}
           />
           <DialsPerHourDataTable
             data={dialsPerHourTableData}
             totalHours={totalHoursForDialsPerHour}
             open={dialsPerHourTableOpen}
             onOpenChange={setDialsPerHourTableOpen}
+            excludedIds={getExcludedIdsForTable("dialsPerHour")}
+            onExcludeRecords={(ids) => excludeRecords("dialsPerHour", ids)}
           />
           <ConversionQualifiedDataTable
             data={filteredSecondaryPitchedCalls}
             open={conversionQualifiedTableOpen}
             onOpenChange={setConversionQualifiedTableOpen}
+            excludedIds={getExcludedIdsForTable("conversionQualified")}
+            onExcludeRecords={(ids) => excludeRecords("conversionQualified", ids)}
           />
           <ConversionUnqualifiedDataTable
             data={filteredSecondaryPitchedCalls}
             open={conversionUnqualifiedTableOpen}
             onOpenChange={setConversionUnqualifiedTableOpen}
+            excludedIds={getExcludedIdsForTable("conversionUnqualified")}
+            onExcludeRecords={(ids) => excludeRecords("conversionUnqualified", ids)}
           />
           <GrossIssueDataTable
             data={filteredSecondaryGrossIssueCalls}
             open={grossIssueTableOpen}
             onOpenChange={setGrossIssueTableOpen}
+            excludedIds={getExcludedIdsForTable("grossIssue")}
+            onExcludeRecords={(ids) => excludeRecords("grossIssue", ids)}
           />
         </>
       )}
+
+      {/* Excluded Records Panel */}
+      <ExcludedRecordsPanel
+        open={excludedRecordsPanelOpen}
+        onOpenChange={setExcludedRecordsPanelOpen}
+        excludedRecords={excludedRecords}
+        onRestoreRecords={restoreByDocIds}
+        loading={excludedRecordsLoading}
+        availableRecordIds={availableRecordIdsForPanel}
+      />
     </div>
   )
 }

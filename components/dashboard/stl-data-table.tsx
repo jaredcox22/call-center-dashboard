@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useMemo } from "react"
+import { useState, useMemo, useCallback } from "react"
 import {
   Dialog,
   DialogContent,
@@ -22,6 +22,12 @@ import { Button } from "@/components/ui/button"
 import { format } from "date-fns"
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible"
+import {
+  SelectionCheckbox,
+  SelectAllCheckbox,
+  ExcludeRowButton,
+  ExcludeSelectedButton,
+} from "./table-row-selection"
 
 /**
  * Formats seconds into a human-readable format with days, hours, minutes, and seconds
@@ -82,20 +88,41 @@ interface STLDataTableProps {
   data: STLRecord[]
   open: boolean
   onOpenChange: (open: boolean) => void
+  excludedIds?: Set<string>
+  onExcludeRecords?: (recordIds: string[]) => void
 }
 
 type SortField = "leadId" | "employee" | "stl" | "dateReceived" | "checkOutDate" | "callDate"
 type SortDirection = "asc" | "desc" | null
 
-export function STLDataTable({ data, open, onOpenChange }: STLDataTableProps) {
+export function STLDataTable({ 
+  data, 
+  open, 
+  onOpenChange,
+  excludedIds = new Set(),
+  onExcludeRecords,
+}: STLDataTableProps) {
   const [searchQuery, setSearchQuery] = useState("")
   const [sortField, setSortField] = useState<SortField>("stl")
   const [sortDirection, setSortDirection] = useState<SortDirection>("asc")
   const [isInfoOpen, setIsInfoOpen] = useState(false)
+  const [selectedRows, setSelectedRows] = useState<Set<string>>(new Set())
 
-  // Filter and sort data
+  // Get record ID for exclusion (using leadId)
+  const getRecordId = (record: STLRecord): string => {
+    return record.leadId?.toString() ?? ""
+  }
+
+  // Filter out excluded records and apply search/sort
   const filteredAndSortedData = useMemo(() => {
+    // First filter out excluded records
     let filtered = data.filter((record) => {
+      const recordId = getRecordId(record)
+      return recordId && !excludedIds.has(recordId)
+    })
+
+    // Then apply search filter
+    filtered = filtered.filter((record) => {
       const query = searchQuery.toLowerCase()
       return (
         record.employee?.toLowerCase().includes(query) ||
@@ -136,7 +163,15 @@ export function STLDataTable({ data, open, onOpenChange }: STLDataTableProps) {
     }
 
     return filtered
-  }, [data, searchQuery, sortField, sortDirection])
+  }, [data, searchQuery, sortField, sortDirection, excludedIds])
+
+  // Clear selection when dialog closes
+  const handleOpenChange = useCallback((newOpen: boolean) => {
+    if (!newOpen) {
+      setSelectedRows(new Set())
+    }
+    onOpenChange(newOpen)
+  }, [onOpenChange])
 
   const handleSort = (field: SortField) => {
     if (sortField === field) {
@@ -165,8 +200,61 @@ export function STLDataTable({ data, open, onOpenChange }: STLDataTableProps) {
     )
   }
 
+  // Selection handlers
+  const handleSelectAll = useCallback((checked: boolean) => {
+    if (checked) {
+      const allIds = new Set(
+        filteredAndSortedData
+          .map((record) => getRecordId(record))
+          .filter((id) => id !== "")
+      )
+      setSelectedRows(allIds)
+    } else {
+      setSelectedRows(new Set())
+    }
+  }, [filteredAndSortedData])
+
+  const handleSelectRow = useCallback((recordId: string, checked: boolean) => {
+    setSelectedRows((prev) => {
+      const next = new Set(prev)
+      if (checked) {
+        next.add(recordId)
+      } else {
+        next.delete(recordId)
+      }
+      return next
+    })
+  }, [])
+
+  const handleExcludeSelected = useCallback(() => {
+    if (onExcludeRecords && selectedRows.size > 0) {
+      onExcludeRecords(Array.from(selectedRows))
+      setSelectedRows(new Set())
+    }
+  }, [onExcludeRecords, selectedRows])
+
+  const handleExcludeRow = useCallback((recordId: string) => {
+    if (onExcludeRecords) {
+      onExcludeRecords([recordId])
+    }
+  }, [onExcludeRecords])
+
+  // Determine select all checkbox state
+  const selectAllState = useMemo(() => {
+    const selectableIds = filteredAndSortedData
+      .map((record) => getRecordId(record))
+      .filter((id) => id !== "")
+    
+    if (selectableIds.length === 0) return false
+    
+    const selectedCount = selectableIds.filter((id) => selectedRows.has(id)).length
+    if (selectedCount === 0) return false
+    if (selectedCount === selectableIds.length) return true
+    return "indeterminate" as const
+  }, [filteredAndSortedData, selectedRows])
+
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
+    <Dialog open={open} onOpenChange={handleOpenChange}>
       <DialogContent className="max-w-[95vw] lg:max-w-7xl max-h-[90vh] overflow-hidden flex flex-col p-0 gap-0">
         <DialogHeader className="px-6 pt-6 pb-4">
           <DialogTitle>Checkout to Dial Time - Data Table</DialogTitle>
@@ -224,7 +312,7 @@ export function STLDataTable({ data, open, onOpenChange }: STLDataTableProps) {
               </div>
             </Alert>
           </Collapsible>
-          {/* Search Input */}
+          {/* Search Input and Actions */}
           <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
             <Input
               placeholder="Search by employee, lead ID, customer ID, or dates..."
@@ -232,8 +320,16 @@ export function STLDataTable({ data, open, onOpenChange }: STLDataTableProps) {
               onChange={(e) => setSearchQuery(e.target.value)}
               className="w-full"
             />
-            <div className="text-sm text-muted-foreground whitespace-nowrap text-center sm:text-left">
-              {filteredAndSortedData.length} of {data.length} records
+            <div className="flex items-center gap-2">
+              {onExcludeRecords && (
+                <ExcludeSelectedButton
+                  selectedCount={selectedRows.size}
+                  onClick={handleExcludeSelected}
+                />
+              )}
+              <div className="text-sm text-muted-foreground whitespace-nowrap text-center sm:text-left">
+                {filteredAndSortedData.length} of {data.length} records
+              </div>
             </div>
           </div>
 
@@ -242,6 +338,14 @@ export function STLDataTable({ data, open, onOpenChange }: STLDataTableProps) {
             <Table>
               <TableHeader className="sticky top-0 bg-background z-10">
                 <TableRow>
+                  {onExcludeRecords && (
+                    <TableHead className="w-[50px]">
+                      <SelectAllCheckbox
+                        checked={selectAllState}
+                        onCheckedChange={handleSelectAll}
+                      />
+                    </TableHead>
+                  )}
                   <TableHead className="w-[100px]">
                     <Button
                       variant="ghost"
@@ -309,39 +413,65 @@ export function STLDataTable({ data, open, onOpenChange }: STLDataTableProps) {
                     </Button>
                   </TableHead>
                   <TableHead className="w-[100px] hidden sm:table-cell">Customer ID</TableHead>
+                  {onExcludeRecords && (
+                    <TableHead className="w-[50px]">Actions</TableHead>
+                  )}
                 </TableRow>
               </TableHeader>
               <TableBody>
                 {filteredAndSortedData.length === 0 ? (
                   <TableRow>
-                    <TableCell colSpan={7} className="text-center py-8 text-muted-foreground">
+                    <TableCell colSpan={onExcludeRecords ? 9 : 7} className="text-center py-8 text-muted-foreground">
                       {searchQuery ? "No records found matching your search." : "No data available."}
                     </TableCell>
                   </TableRow>
                 ) : (
-                  filteredAndSortedData.map((record, index) => (
-                    <TableRow key={`${record.leadId}-${index}`}>
-                      <TableCell className="font-medium">
-                        {record.leadId ?? "N/A"}
-                      </TableCell>
-                      <TableCell className="min-w-[120px]">{record.employee || "N/A"}</TableCell>
-                      <TableCell className="font-medium">
-                        {formatSecondsToMinutes(record.stl)}
-                      </TableCell>
-                      <TableCell className="text-sm text-muted-foreground min-w-[160px]">
-                        {formatDate(record.dateReceived)}
-                      </TableCell>
-                      <TableCell className="text-sm text-muted-foreground min-w-[160px]">
-                        {formatDate(record.checkOutDate)}
-                      </TableCell>
-                      <TableCell className="text-sm text-muted-foreground min-w-[160px]">
-                        {formatDate(record.callDate)}
-                      </TableCell>
-                      <TableCell className="text-sm text-muted-foreground hidden sm:table-cell">
-                        {record.cst_id ?? "N/A"}
-                      </TableCell>
-                    </TableRow>
-                  ))
+                  filteredAndSortedData.map((record, index) => {
+                    const recordId = getRecordId(record)
+                    const isSelected = recordId ? selectedRows.has(recordId) : false
+                    
+                    return (
+                      <TableRow key={`${record.leadId}-${index}`}>
+                        {onExcludeRecords && (
+                          <TableCell>
+                            <SelectionCheckbox
+                              checked={isSelected}
+                              onCheckedChange={(checked) => handleSelectRow(recordId, checked)}
+                              disabled={!recordId}
+                              ariaLabel={`Select lead ${record.leadId}`}
+                            />
+                          </TableCell>
+                        )}
+                        <TableCell className="font-medium">
+                          {record.leadId ?? "N/A"}
+                        </TableCell>
+                        <TableCell className="min-w-[120px]">{record.employee || "N/A"}</TableCell>
+                        <TableCell className="font-medium">
+                          {formatSecondsToMinutes(record.stl)}
+                        </TableCell>
+                        <TableCell className="text-sm text-muted-foreground min-w-[160px]">
+                          {formatDate(record.dateReceived)}
+                        </TableCell>
+                        <TableCell className="text-sm text-muted-foreground min-w-[160px]">
+                          {formatDate(record.checkOutDate)}
+                        </TableCell>
+                        <TableCell className="text-sm text-muted-foreground min-w-[160px]">
+                          {formatDate(record.callDate)}
+                        </TableCell>
+                        <TableCell className="text-sm text-muted-foreground hidden sm:table-cell">
+                          {record.cst_id ?? "N/A"}
+                        </TableCell>
+                        {onExcludeRecords && (
+                          <TableCell>
+                            <ExcludeRowButton
+                              onClick={() => handleExcludeRow(recordId)}
+                              disabled={!recordId}
+                            />
+                          </TableCell>
+                        )}
+                      </TableRow>
+                    )
+                  })
                 )}
               </TableBody>
             </Table>
@@ -351,4 +481,3 @@ export function STLDataTable({ data, open, onOpenChange }: STLDataTableProps) {
     </Dialog>
   )
 }
-
