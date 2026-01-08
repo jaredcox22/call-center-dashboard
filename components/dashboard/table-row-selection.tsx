@@ -32,7 +32,7 @@ export function SelectionCheckbox({
       onCheckedChange={onCheckedChange}
       disabled={disabled}
       aria-label={ariaLabel}
-      className="translate-y-[2px]"
+      className="translate-y-[2px] dark:border-slate-400 dark:data-[state=unchecked]:bg-slate-800/50"
     />
   )
 }
@@ -57,7 +57,7 @@ export function SelectAllCheckbox({
       onCheckedChange={onCheckedChange}
       disabled={disabled}
       aria-label="Select all"
-      className="translate-y-[2px]"
+      className="translate-y-[2px] dark:border-slate-400 dark:data-[state=unchecked]:bg-slate-800/50"
     />
   )
 }
