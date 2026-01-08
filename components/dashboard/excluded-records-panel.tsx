@@ -185,39 +185,48 @@ export function ExcludedRecordsPanel({
 
   return (
     <Sheet open={open} onOpenChange={handleOpenChange}>
-      <SheetContent side="right" className="w-full sm:max-w-2xl flex flex-col">
-        <SheetHeader>
-          <SheetTitle className="flex items-center gap-2">
-            <RotateCcw className="h-5 w-5" />
-            Excluded Records
-            {excludedRecords.length > 0 && (
-              <Badge variant="secondary">{excludedRecords.length}</Badge>
-            )}
-          </SheetTitle>
-          <SheetDescription>
-            View and restore records that have been excluded from calculations. 
-            Restored records will be included again for all users.
-          </SheetDescription>
-        </SheetHeader>
+      <SheetContent 
+        side="right" 
+        className="w-full sm:max-w-2xl flex flex-col p-0 gap-0"
+      >
+        {/* Header with padding */}
+        <div className="px-4 sm:px-6 pt-6 pb-4 border-b">
+          <SheetHeader className="space-y-2">
+            <SheetTitle className="flex items-center gap-2 text-lg">
+              <RotateCcw className="h-5 w-5" />
+              Excluded Records
+              {excludedRecords.length > 0 && (
+                <Badge variant="secondary" className="ml-1">
+                  {excludedRecords.length}
+                </Badge>
+              )}
+            </SheetTitle>
+            <SheetDescription className="text-sm">
+              View and restore records that have been excluded from calculations. 
+              Restored records will be included again for all users.
+            </SheetDescription>
+          </SheetHeader>
+        </div>
 
-        <div className="flex flex-col gap-4 flex-1 min-h-0 mt-4">
+        {/* Content area with padding */}
+        <div className="flex flex-col flex-1 min-h-0 px-4 sm:px-6 py-4 gap-4">
           {/* Filters */}
-          <div className="flex flex-col sm:flex-row gap-2">
-            <div className="relative flex-1">
+          <div className="flex flex-col gap-3">
+            <div className="relative">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
               <Input
                 placeholder="Search by record ID, email..."
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
-                className="pl-9"
+                className="pl-9 h-10"
               />
             </div>
             <Select
               value={filterTableType}
               onValueChange={(value) => setFilterTableType(value as ExcludableTableType | "all")}
             >
-              <SelectTrigger className="w-full sm:w-[200px]">
-                <Filter className="h-4 w-4 mr-2" />
+              <SelectTrigger className="w-full h-10">
+                <Filter className="h-4 w-4 mr-2 shrink-0" />
                 <SelectValue placeholder="Filter by type" />
               </SelectTrigger>
               <SelectContent>
@@ -232,7 +241,7 @@ export function ExcludedRecordsPanel({
           </div>
 
           {/* Actions bar */}
-          <div className="flex items-center justify-between">
+          <div className="flex items-center justify-between gap-2 flex-wrap">
             <RestoreSelectedButton
               selectedCount={selectedRows.size}
               onClick={handleRestoreSelected}
@@ -244,43 +253,50 @@ export function ExcludedRecordsPanel({
           </div>
 
           {/* Table */}
-          <div className="flex-1 overflow-auto border rounded-md">
+          <div className="flex-1 overflow-auto border rounded-lg min-h-[200px]">
             <Table>
               <TableHeader className="sticky top-0 bg-background z-10">
                 <TableRow>
-                  <TableHead className="w-[50px]">
+                  <TableHead className="w-[44px] px-3">
                     <SelectAllCheckbox
                       checked={selectAllState}
                       onCheckedChange={handleSelectAll}
                       disabled={loading || isRestoring}
                     />
                   </TableHead>
-                  <TableHead className="min-w-[100px]">Record ID</TableHead>
-                  <TableHead className="min-w-[150px]">Table</TableHead>
-                  <TableHead className="min-w-[150px] hidden sm:table-cell">Excluded By</TableHead>
-                  <TableHead className="min-w-[150px] hidden sm:table-cell">Excluded At</TableHead>
-                  <TableHead className="w-[50px]">Actions</TableHead>
+                  <TableHead className="min-w-[80px] px-3">Record ID</TableHead>
+                  <TableHead className="min-w-[120px] px-3 hidden sm:table-cell">Table</TableHead>
+                  <TableHead className="min-w-[140px] px-3 hidden md:table-cell">Excluded By</TableHead>
+                  <TableHead className="min-w-[140px] px-3 hidden lg:table-cell">Excluded At</TableHead>
+                  <TableHead className="w-[44px] px-3">
+                    <span className="sr-only">Actions</span>
+                  </TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
                 {loading ? (
                   <TableRow>
-                    <TableCell colSpan={6} className="text-center py-8 text-muted-foreground">
+                    <TableCell colSpan={6} className="text-center py-12 text-muted-foreground">
                       Loading excluded records...
                     </TableCell>
                   </TableRow>
                 ) : filteredRecords.length === 0 ? (
                   <TableRow>
-                    <TableCell colSpan={6} className="text-center py-8 text-muted-foreground">
-                      {excludedRecords.length === 0 
-                        ? "No records have been excluded yet."
-                        : "No records match your search criteria."}
+                    <TableCell colSpan={6} className="text-center py-12 text-muted-foreground">
+                      <div className="flex flex-col items-center gap-2">
+                        <RotateCcw className="h-8 w-8 text-muted-foreground/50" />
+                        <p>
+                          {excludedRecords.length === 0 
+                            ? "No records have been excluded yet."
+                            : "No records match your search criteria."}
+                        </p>
+                      </div>
                     </TableCell>
                   </TableRow>
                 ) : (
                   filteredRecords.map((record) => (
                     <TableRow key={record.id}>
-                      <TableCell>
+                      <TableCell className="px-3">
                         <SelectionCheckbox
                           checked={selectedRows.has(record.id)}
                           onCheckedChange={(checked) => handleSelectRow(record.id, checked)}
@@ -288,21 +304,29 @@ export function ExcludedRecordsPanel({
                           ariaLabel={`Select record ${record.recordId}`}
                         />
                       </TableCell>
-                      <TableCell className="font-medium font-mono text-sm">
-                        {record.recordId}
+                      <TableCell className="px-3">
+                        <span className="font-medium font-mono text-sm">
+                          {record.recordId}
+                        </span>
+                        {/* Show table type on mobile below record ID */}
+                        <div className="sm:hidden mt-1">
+                          <Badge variant="outline" className="text-xs">
+                            {tableTypeLabels[record.tableType]}
+                          </Badge>
+                        </div>
                       </TableCell>
-                      <TableCell>
-                        <Badge variant="outline" className="whitespace-nowrap">
+                      <TableCell className="px-3 hidden sm:table-cell">
+                        <Badge variant="outline" className="whitespace-nowrap text-xs">
                           {tableTypeLabels[record.tableType]}
                         </Badge>
                       </TableCell>
-                      <TableCell className="text-sm text-muted-foreground hidden sm:table-cell">
+                      <TableCell className="px-3 text-sm text-muted-foreground hidden md:table-cell truncate max-w-[180px]">
                         {record.excludedBy}
                       </TableCell>
-                      <TableCell className="text-sm text-muted-foreground hidden sm:table-cell">
+                      <TableCell className="px-3 text-sm text-muted-foreground hidden lg:table-cell whitespace-nowrap">
                         {formatTimestamp(record.excludedAt)}
                       </TableCell>
-                      <TableCell>
+                      <TableCell className="px-3">
                         <RestoreRowButton
                           onClick={() => handleRestoreRow(record.id)}
                           disabled={loading || isRestoring}
@@ -314,9 +338,11 @@ export function ExcludedRecordsPanel({
               </TableBody>
             </Table>
           </div>
+        </div>
 
-          {/* Help text */}
-          <p className="text-xs text-muted-foreground">
+        {/* Footer with help text */}
+        <div className="px-4 sm:px-6 py-4 border-t bg-muted/30">
+          <p className="text-xs text-muted-foreground leading-relaxed">
             Excluded records are hidden from all calculations and data tables across all users.
             Restoring a record will make it visible again for everyone.
           </p>
