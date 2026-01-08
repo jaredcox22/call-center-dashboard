@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useMemo, useEffect, startTransition } from "react"
+import { useState, useMemo, useEffect, useCallback } from "react"
 import {
   Dialog,
   DialogContent,
@@ -27,11 +27,14 @@ import {
   Pagination,
   PaginationContent,
   PaginationItem,
-  PaginationLink,
-  PaginationNext,
-  PaginationPrevious,
   PaginationEllipsis,
 } from "@/components/ui/pagination"
+import {
+  SelectionCheckbox,
+  SelectAllCheckbox,
+  ExcludeRowButton,
+  ExcludeSelectedButton,
+} from "./table-row-selection"
 
 /**
  * Formats a date string to a readable format
@@ -58,23 +61,40 @@ interface GrossIssueDataTableProps {
   data: GrossIssueRecord[]
   open: boolean
   onOpenChange: (open: boolean) => void
+  excludedIds?: Set<string>
+  onExcludeRecords?: (recordIds: string[]) => void
 }
 
 type SortField = "employee" | "date" | "ApptSet" | "Issued" | "id"
 type SortDirection = "asc" | "desc" | null
 
-export function GrossIssueDataTable({ data, open, onOpenChange }: GrossIssueDataTableProps) {
+export function GrossIssueDataTable({ 
+  data, 
+  open, 
+  onOpenChange,
+  excludedIds = new Set(),
+  onExcludeRecords,
+}: GrossIssueDataTableProps) {
   const [searchQuery, setSearchQuery] = useState("")
   const [sortField, setSortField] = useState<SortField>("date")
   const [sortDirection, setSortDirection] = useState<SortDirection>("desc")
   const [isInfoOpen, setIsInfoOpen] = useState(false)
   const [currentPage, setCurrentPage] = useState(1)
+  const [selectedRows, setSelectedRows] = useState<Set<string>>(new Set())
   const itemsPerPage = 50 // Render only 50 rows at a time to prevent blocking
 
-  // Filter to only calls where ApptSet > 0
+  // Get record ID for exclusion
+  const getRecordId = (record: GrossIssueRecord): string => {
+    return record.id?.toString() ?? ""
+  }
+
+  // Filter to only calls where ApptSet > 0 and not excluded
   const apptSetData = useMemo(() => {
-    return data.filter((record) => record.ApptSet != null && record.ApptSet > 0)
-  }, [data])
+    return data.filter((record) => {
+      const recordId = getRecordId(record)
+      return record.ApptSet != null && record.ApptSet > 0 && recordId && !excludedIds.has(recordId)
+    })
+  }, [data, excludedIds])
 
   // Pre-compute formatted dates to avoid calling formatDate during rendering
   const formattedDates = useMemo(() => {
@@ -153,6 +173,14 @@ export function GrossIssueDataTable({ data, open, onOpenChange }: GrossIssueData
     setCurrentPage(1)
   }, [searchQuery, sortField, sortDirection])
 
+  // Clear selection when dialog closes
+  const handleOpenChange = useCallback((newOpen: boolean) => {
+    if (!newOpen) {
+      setSelectedRows(new Set())
+    }
+    onOpenChange(newOpen)
+  }, [onOpenChange])
+
   // Calculate pagination
   const totalPages = Math.ceil(filteredAndSortedData.length / itemsPerPage)
   const startIndex = (currentPage - 1) * itemsPerPage
@@ -223,8 +251,61 @@ export function GrossIssueDataTable({ data, open, onOpenChange }: GrossIssueData
     )
   }
 
+  // Selection handlers
+  const handleSelectAll = useCallback((checked: boolean) => {
+    if (checked) {
+      const allIds = new Set(
+        paginatedData
+          .map((record) => getRecordId(record))
+          .filter((id) => id !== "")
+      )
+      setSelectedRows(allIds)
+    } else {
+      setSelectedRows(new Set())
+    }
+  }, [paginatedData])
+
+  const handleSelectRow = useCallback((recordId: string, checked: boolean) => {
+    setSelectedRows((prev) => {
+      const next = new Set(prev)
+      if (checked) {
+        next.add(recordId)
+      } else {
+        next.delete(recordId)
+      }
+      return next
+    })
+  }, [])
+
+  const handleExcludeSelected = useCallback(() => {
+    if (onExcludeRecords && selectedRows.size > 0) {
+      onExcludeRecords(Array.from(selectedRows))
+      setSelectedRows(new Set())
+    }
+  }, [onExcludeRecords, selectedRows])
+
+  const handleExcludeRow = useCallback((recordId: string) => {
+    if (onExcludeRecords) {
+      onExcludeRecords([recordId])
+    }
+  }, [onExcludeRecords])
+
+  // Determine select all checkbox state (for current page only)
+  const selectAllState = useMemo(() => {
+    const selectableIds = paginatedData
+      .map((record) => getRecordId(record))
+      .filter((id) => id !== "")
+    
+    if (selectableIds.length === 0) return false
+    
+    const selectedCount = selectableIds.filter((id) => selectedRows.has(id)).length
+    if (selectedCount === 0) return false
+    if (selectedCount === selectableIds.length) return true
+    return "indeterminate" as const
+  }, [paginatedData, selectedRows])
+
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
+    <Dialog open={open} onOpenChange={handleOpenChange}>
       <DialogContent className="max-w-[95vw] lg:max-w-7xl max-h-[90vh] overflow-hidden flex flex-col p-0 gap-0">
         <DialogHeader className="px-6 pt-6 pb-4">
           <DialogTitle>Gross Issue - Data Table</DialogTitle>
@@ -284,7 +365,7 @@ export function GrossIssueDataTable({ data, open, onOpenChange }: GrossIssueData
             </Alert>
           </Collapsible>
 
-          {/* Search Input */}
+          {/* Search Input and Actions */}
           <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
             <Input
               placeholder="Search by employee, date, call ID, or issue status..."
@@ -292,8 +373,16 @@ export function GrossIssueDataTable({ data, open, onOpenChange }: GrossIssueData
               onChange={(e) => setSearchQuery(e.target.value)}
               className="w-full"
             />
-            <div className="text-sm text-muted-foreground whitespace-nowrap text-center sm:text-left">
-              Showing {startIndex + 1}-{Math.min(endIndex, filteredAndSortedData.length)} of {filteredAndSortedData.length} records
+            <div className="flex items-center gap-2">
+              {onExcludeRecords && (
+                <ExcludeSelectedButton
+                  selectedCount={selectedRows.size}
+                  onClick={handleExcludeSelected}
+                />
+              )}
+              <div className="text-sm text-muted-foreground whitespace-nowrap text-center sm:text-left">
+                Showing {startIndex + 1}-{Math.min(endIndex, filteredAndSortedData.length)} of {filteredAndSortedData.length} records
+              </div>
             </div>
           </div>
 
@@ -302,6 +391,14 @@ export function GrossIssueDataTable({ data, open, onOpenChange }: GrossIssueData
             <Table>
               <TableHeader className="sticky top-0 bg-background z-10">
                 <TableRow>
+                  {onExcludeRecords && (
+                    <TableHead className="w-[50px]">
+                      <SelectAllCheckbox
+                        checked={selectAllState}
+                        onCheckedChange={handleSelectAll}
+                      />
+                    </TableHead>
+                  )}
                   <TableHead className="min-w-[120px] sm:min-w-[150px]">
                     <Button
                       variant="ghost"
@@ -346,36 +443,62 @@ export function GrossIssueDataTable({ data, open, onOpenChange }: GrossIssueData
                       {getSortIcon("id")}
                     </Button>
                   </TableHead>
+                  {onExcludeRecords && (
+                    <TableHead className="w-[50px]">Actions</TableHead>
+                  )}
                 </TableRow>
               </TableHeader>
               <TableBody>
                 {filteredAndSortedData.length === 0 ? (
                   <TableRow>
-                    <TableCell colSpan={4} className="text-center py-8 text-muted-foreground">
+                    <TableCell colSpan={onExcludeRecords ? 6 : 4} className="text-center py-8 text-muted-foreground">
                       {searchQuery ? "No records found matching your search." : "No data available."}
                     </TableCell>
                   </TableRow>
                 ) : (
-                  paginatedData.map((record, index) => (
-                    <TableRow key={`gross-issue-${record.id ?? record.employee}-${record.date}-${startIndex + index}`}>
-                      <TableCell className="min-w-[120px] font-medium">
-                        {record.employee || "N/A"}
-                      </TableCell>
-                      <TableCell className="text-sm text-muted-foreground min-w-[160px]">
-                        {formattedDates.get(record.date) ?? formatDate(record.date)}
-                      </TableCell>
-                      <TableCell className="font-medium">
-                        {record.Issued != null && record.Issued > 0 ? (
-                          <span className="text-green-600 dark:text-green-400">Yes</span>
-                        ) : (
-                          <span className="text-muted-foreground">No</span>
+                  paginatedData.map((record, index) => {
+                    const recordId = getRecordId(record)
+                    const isSelected = recordId ? selectedRows.has(recordId) : false
+                    
+                    return (
+                      <TableRow key={`gross-issue-${record.id ?? record.employee}-${record.date}-${startIndex + index}`}>
+                        {onExcludeRecords && (
+                          <TableCell>
+                            <SelectionCheckbox
+                              checked={isSelected}
+                              onCheckedChange={(checked) => handleSelectRow(recordId, checked)}
+                              disabled={!recordId}
+                              ariaLabel={`Select call ${record.id}`}
+                            />
+                          </TableCell>
                         )}
-                      </TableCell>
-                      <TableCell className="text-sm text-muted-foreground hidden sm:table-cell">
-                        {record.id ?? "N/A"}
-                      </TableCell>
-                    </TableRow>
-                  ))
+                        <TableCell className="min-w-[120px] font-medium">
+                          {record.employee || "N/A"}
+                        </TableCell>
+                        <TableCell className="text-sm text-muted-foreground min-w-[160px]">
+                          {formattedDates.get(record.date) ?? formatDate(record.date)}
+                        </TableCell>
+                        <TableCell className="font-medium">
+                          {record.Issued != null && record.Issued > 0 ? (
+                            <span className="text-green-600 dark:text-green-400">Yes</span>
+                          ) : (
+                            <span className="text-muted-foreground">No</span>
+                          )}
+                        </TableCell>
+                        <TableCell className="text-sm text-muted-foreground hidden sm:table-cell">
+                          {record.id ?? "N/A"}
+                        </TableCell>
+                        {onExcludeRecords && (
+                          <TableCell>
+                            <ExcludeRowButton
+                              onClick={() => handleExcludeRow(recordId)}
+                              disabled={!recordId}
+                            />
+                          </TableCell>
+                        )}
+                      </TableRow>
+                    )
+                  })
                 )}
               </TableBody>
             </Table>
