@@ -1217,43 +1217,48 @@ $holidays = [
                 lds_Leads.DateEntered as 'DateEntered',
                 in1_InboundQueue1.DateReceived as 'DateReceived',
                 in1_InboundQueue1.CheckOutDate as 'CheckOutDate',
-                cRef.CallDate as 'CallDate',
-                emp_Employees.FirstName as 'FirstName',
-                emp_Employees.LastName as 'LastName'
+                (
+                    SELECT TOP 1 CallDate
+                    FROM cls_Calls
+                    WHERE cst_id = lds_Leads.cst_id
+                        AND CallDate > in1_InboundQueue1.CheckOutDate
+                        AND ResultCode NOT IN ('*ND', 'ccND', 'NDDNC', 'NDLB', 'NDTR')
+                    ORDER BY CallDate ASC
+                ) as 'CallDate',
+                (
+                    SELECT TOP 1 emp_Employees.FirstName
+                    FROM cls_Calls
+                    INNER JOIN emp_Employees ON cls_Calls.emp_id = emp_Employees.id
+                    WHERE cst_id = lds_Leads.cst_id
+                        AND CallDate > in1_InboundQueue1.CheckOutDate
+                        AND ResultCode NOT IN ('*ND', 'ccND', 'NDDNC', 'NDLB', 'NDTR')
+                    ORDER BY CallDate ASC
+                ) as 'FirstName',
+                (
+                    SELECT TOP 1 emp_Employees.LastName
+                    FROM cls_Calls
+                    INNER JOIN emp_Employees ON cls_Calls.emp_id = emp_Employees.id
+                    WHERE cst_id = lds_Leads.cst_id
+                        AND CallDate > in1_InboundQueue1.CheckOutDate
+                        AND ResultCode NOT IN ('*ND', 'ccND', 'NDDNC', 'NDLB', 'NDTR')
+                    ORDER BY CallDate ASC
+                ) as 'LastName'
             FROM
                 lds_Leads
             LEFT JOIN
-                (
-                    SELECT
-                        MAX(id) as id,
-                        cst_id,
-                        MIN(CallDate) as CallDate
-                    FROM
-                        cls_Calls
-                    WHERE
-                        ResultCode NOT IN ('*ND', 'ccND', 'NDDNC', 'NDLB', 'NDTR')
-                    GROUP BY
-                        cst_id
-                ) as cRef
-                ON
-                    lds_Leads.cst_id = cRef.cst_id
-                LEFT JOIN
-                    cls_Calls
-                ON
-                    cRef.id = cls_Calls.id
-                LEFT JOIN
-                    emp_Employees
-                ON
-                    cls_Calls.emp_id = emp_Employees.id
-                LEFT JOIN
-                    in1_InboundQueue1
-                ON
-                    lds_Leads.id = in1_InboundQueue1.lds_id
-                WHERE
-                    in1_InboundQueue1.CheckOutDate
-                BETWEEN
-                    '$start' AND '$end' AND
-                    in1_InboundQueue1.DateReceived IS NOT NULL
+                in1_InboundQueue1
+            ON
+                lds_Leads.id = in1_InboundQueue1.lds_id
+            WHERE
+                in1_InboundQueue1.DateReceived IS NOT NULL
+                AND (
+                    SELECT TOP 1 CallDate
+                    FROM cls_Calls
+                    WHERE cst_id = lds_Leads.cst_id
+                        AND CallDate > in1_InboundQueue1.CheckOutDate
+                        AND ResultCode NOT IN ('*ND', 'ccND', 'NDDNC', 'NDLB', 'NDTR')
+                    ORDER BY CallDate ASC
+                ) BETWEEN '$start' AND '$end'
     ";
 
     $rtdData = curlCall("$endpoint/lp/customReport.php?rptSQL=" . urlencode($query));
