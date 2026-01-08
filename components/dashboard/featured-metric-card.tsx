@@ -6,19 +6,35 @@ import { Info, Table2 } from "lucide-react"
 import { useEffect, useState } from "react"
 
 /**
- * Formats seconds into a human-readable minutes and seconds format
- * Examples: 45 -> "45s", 90 -> "1m 30s", 125 -> "2m 5s"
+ * Formats seconds into a human-readable format with days, hours, minutes, and seconds
+ * Examples: 45 -> "45s", 90 -> "1m 30s", 3665 -> "1h 1m 5s", 488908 -> "5d 15h 48m 28s"
  */
 const formatSecondsToMinutes = (seconds: number): string => {
   if (seconds < 60) {
     return `${seconds}s`
   }
-  const minutes = Math.floor(seconds / 60)
+  
+  const days = Math.floor(seconds / 86400)
+  const hours = Math.floor((seconds % 86400) / 3600)
+  const minutes = Math.floor((seconds % 3600) / 60)
   const remainingSeconds = seconds % 60
-  if (remainingSeconds === 0) {
-    return `${minutes}m`
+  
+  const parts: string[] = []
+  
+  if (days > 0) {
+    parts.push(`${days}d`)
   }
-  return `${minutes}m ${remainingSeconds}s`
+  if (hours > 0) {
+    parts.push(`${hours}h`)
+  }
+  if (minutes > 0) {
+    parts.push(`${minutes}m`)
+  }
+  if (remainingSeconds > 0 || parts.length === 0) {
+    parts.push(`${remainingSeconds}s`)
+  }
+  
+  return parts.join(' ')
 }
 
 interface MetricRange {

@@ -53,19 +53,35 @@ const fetcher = async (url: string) => {
 }
 
 /**
- * Formats seconds into a human-readable minutes and seconds format
- * Examples: 45 -> "45s", 90 -> "1m 30s", 125 -> "2m 5s"
+ * Formats seconds into a human-readable format with days, hours, minutes, and seconds
+ * Examples: 45 -> "45s", 90 -> "1m 30s", 3665 -> "1h 1m 5s", 488908 -> "5d 15h 48m 28s"
  */
 const formatSecondsToMinutes = (seconds: number): string => {
   if (seconds < 60) {
     return `${seconds}s`
   }
-  const minutes = Math.floor(seconds / 60)
+  
+  const days = Math.floor(seconds / 86400)
+  const hours = Math.floor((seconds % 86400) / 3600)
+  const minutes = Math.floor((seconds % 3600) / 60)
   const remainingSeconds = seconds % 60
-  if (remainingSeconds === 0) {
-    return `${minutes}m`
+  
+  const parts: string[] = []
+  
+  if (days > 0) {
+    parts.push(`${days}d`)
   }
-  return `${minutes}m ${remainingSeconds}s`
+  if (hours > 0) {
+    parts.push(`${hours}h`)
+  }
+  if (minutes > 0) {
+    parts.push(`${minutes}m`)
+  }
+  if (remainingSeconds > 0 || parts.length === 0) {
+    parts.push(`${remainingSeconds}s`)
+  }
+  
+  return parts.join(' ')
 }
 
 /**
@@ -272,7 +288,7 @@ const buildApiUrl = (
   secondaryDateRange?: string,
   secondaryCustomRange?: { from: Date | undefined; to?: Date | undefined }
 ) => {
-  const baseUrl = 'https://api.integrityprodserver.com/dashboards/ccHorsepowerTest.php'
+  const baseUrl = 'https://api.integrityprodserver.com/dashboards/ccHorsepower.php'
   const params = new URLSearchParams({ dateRange })
   
   if (dateRange === 'Custom Dates' && customRange?.from && customRange?.to) {
@@ -1906,15 +1922,15 @@ export function DashboardContent() {
                         value={secondaryData.settersMetrics.scoreCard}
                         max={100}
                         target={90}
-                        color={getGaugeColor(secondaryData.settersMetrics.scoreCard, [69, 79, 89, 99])}
+                        color={getGaugeColor(secondaryData.settersMetrics.scoreCard, [59.9, 69.9, 79.9, 89.9])}
                         unit="%"
                         size="small"
                         ranges={[
-                          { label: "Bad", min: 0, max: 69, color: "#ef4444" },
-                          { label: "Average", min: 70, max: 79, color: "#f97316" },
-                          { label: "Good", min: 80, max: 89, color: "#eab308" },
-                          { label: "Excellent", min: 90, max: 99, color: "#22c55e" },
-                          { label: "Elite", min: 100, max: 100, color: "#3b82f6" },
+                          { label: "Bad", min: 0, max: 59.9, color: "#ef4444" },
+                          { label: "Average", min: 60, max: 69.9, color: "#f97316" },
+                          { label: "Good", min: 70, max: 79.9, color: "#eab308" },
+                          { label: "Excellent", min: 80, max: 89.9, color: "#22c55e" },
+                          { label: "Elite", min: 90, max: 100, color: "#3b82f6" },
                         ]}
                         formula="(Sum of actualTotals ÷ Sum of maxTotals) × 100"
                       />

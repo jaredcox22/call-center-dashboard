@@ -24,20 +24,24 @@ import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible"
 
 /**
- * Formats seconds into a human-readable hours, minutes, and seconds format
- * Examples: 45 -> "45s", 90 -> "1m 30s", 125 -> "2m 5s", 3665 -> "1h 1m 5s"
+ * Formats seconds into a human-readable format with days, hours, minutes, and seconds
+ * Examples: 45 -> "45s", 90 -> "1m 30s", 3665 -> "1h 1m 5s", 488908 -> "5d 15h 48m 28s"
  */
 const formatSecondsToMinutes = (seconds: number): string => {
   if (seconds < 60) {
     return `${seconds}s`
   }
   
-  const hours = Math.floor(seconds / 3600)
+  const days = Math.floor(seconds / 86400)
+  const hours = Math.floor((seconds % 86400) / 3600)
   const minutes = Math.floor((seconds % 3600) / 60)
   const remainingSeconds = seconds % 60
   
   const parts: string[] = []
   
+  if (days > 0) {
+    parts.push(`${days}d`)
+  }
   if (hours > 0) {
     parts.push(`${hours}h`)
   }
@@ -197,6 +201,17 @@ export function STLDataTable({ data, open, onOpenChange }: STLDataTableProps) {
                         has a received date (inbound lead), and has a valid call date (first call that's not a "no dial" result code). 
                         Certain source records are excluded per business rules.
                       </p>
+                      <div>
+                        <p className="mb-1">
+                          <strong>Call Center Business Hours:</strong> The STL calculation only counts time during active business hours:
+                        </p>
+                        <ul className="list-disc list-inside mt-1 ml-2 space-y-1">
+                          <li>Monday - Thursday: 8:30 AM - 7:00 PM</li>
+                          <li>Friday: 8:30 AM - 5:00 PM</li>
+                          <li>Saturday: 10:30 AM - 1:00 PM</li>
+                          <li>Sunday: Closed</li>
+                        </ul>
+                      </div>
                       <p>
                         <strong>Note about 0-second values:</strong> Records with 0 seconds STL time are excluded from the average calculation 
                         shown in the metric card. These occur when the checkout date and call date both fall outside active business hours 
