@@ -1089,6 +1089,25 @@ export function DashboardContent() {
     id: call.id ?? null,
   }))
 
+  // Build available record IDs for filtering excluded records panel
+  const availableRecordIdsForPanel = {
+    stl: new Set<string>(filteredStlData.filter((r: any) => r.leadId != null).map((r: any) => String(r.leadId))),
+    connection: new Set<string>(connectionTableData.filter((r: any) => r.id != null).map((r: any) => String(r.id))),
+    pitch: new Set<string>(filteredConnectedCalls.filter((r: any) => r.id != null).map((r: any) => String(r.id))),
+    conversion: new Set<string>(filteredPitchedCalls.filter((r: any) => r.id != null).map((r: any) => String(r.id))),
+    dialsPerHour: new Set<string>(dialsPerHourTableData.filter((r: any) => r.id != null).map((r: any) => String(r.id))),
+    conversionQualified: new Set<string>(filteredSecondaryPitchedCalls.filter((r: any) => r.id != null).map((r: any) => String(r.id))),
+    conversionUnqualified: new Set<string>(filteredSecondaryPitchedCalls.filter((r: any) => r.id != null).map((r: any) => String(r.id))),
+    grossIssue: new Set<string>(filteredSecondaryGrossIssueCalls.filter((r: any) => r.id != null).map((r: any) => String(r.id))),
+  }
+
+  // Count excluded records that are relevant to the current time range
+  const relevantExcludedCount = excludedRecords.filter((record) => {
+    const availableIds = availableRecordIdsForPanel[record.tableType as keyof typeof availableRecordIdsForPanel]
+    if (!availableIds) return true
+    return availableIds.has(record.recordId)
+  }).length
+
   // Calculate total hours for dials per hour metric (same logic as in transformApiData)
   const totalHoursForDialsPerHour = rawData ? (() => {
     if (dashboardType !== 'setters') return 0
@@ -1186,12 +1205,12 @@ export function DashboardContent() {
               className="relative"
             >
               <Ban className="h-4 w-4" />
-              {excludedRecords.length > 0 && (
+              {relevantExcludedCount > 0 && (
                 <Badge 
                   variant="destructive" 
-                  className="absolute -top-1 -right-1 h-4 w-4 p-0 flex items-center justify-center text-[10px]"
+                  className="absolute -top-1.5 -right-1.5 min-w-[18px] h-[18px] px-1 flex items-center justify-center text-[10px] font-medium"
                 >
-                  {excludedRecords.length > 99 ? "99+" : excludedRecords.length}
+                  {relevantExcludedCount > 999 ? "999+" : relevantExcludedCount}
                 </Badge>
               )}
             </Button>
@@ -2289,6 +2308,7 @@ export function DashboardContent() {
         excludedRecords={excludedRecords}
         onRestoreRecords={restoreByDocIds}
         loading={excludedRecordsLoading}
+        availableRecordIds={availableRecordIdsForPanel}
       />
     </div>
   )

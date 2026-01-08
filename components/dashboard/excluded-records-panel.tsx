@@ -37,12 +37,17 @@ import {
 import type { ExcludedRecord, ExcludableTableType } from "@/hooks/use-excluded-records"
 import { Timestamp } from "firebase/firestore"
 
+// Map of available record IDs by table type (for filtering to current time range)
+type AvailableRecordIds = Partial<Record<ExcludableTableType, Set<string>>>
+
 interface ExcludedRecordsPanelProps {
   open: boolean
   onOpenChange: (open: boolean) => void
   excludedRecords: ExcludedRecord[]
   onRestoreRecords: (docIds: string[]) => Promise<void>
   loading?: boolean
+  /** Record IDs available in the current data/time range - only show excluded records that match these */
+  availableRecordIds?: AvailableRecordIds
 }
 
 // Human-readable table type labels
@@ -74,15 +79,29 @@ export function ExcludedRecordsPanel({
   excludedRecords,
   onRestoreRecords,
   loading = false,
+  availableRecordIds,
 }: ExcludedRecordsPanelProps) {
   const [searchQuery, setSearchQuery] = useState("")
   const [filterTableType, setFilterTableType] = useState<ExcludableTableType | "all">("all")
   const [selectedRows, setSelectedRows] = useState<Set<string>>(new Set())
   const [isRestoring, setIsRestoring] = useState(false)
 
+  // Filter excluded records to only show those that exist in the current data/time range
+  const relevantExcludedRecords = useMemo(() => {
+    if (!availableRecordIds) return excludedRecords
+    
+    return excludedRecords.filter((record) => {
+      const availableIds = availableRecordIds[record.tableType]
+      // If we don't have data for this table type, include the record
+      if (!availableIds) return true
+      // Only include if the record ID exists in the current data
+      return availableIds.has(record.recordId)
+    })
+  }, [excludedRecords, availableRecordIds])
+
   // Filter records by table type and search query
   const filteredRecords = useMemo(() => {
-    return excludedRecords.filter((record) => {
+    return relevantExcludedRecords.filter((record) => {
       // Filter by table type
       if (filterTableType !== "all" && record.tableType !== filterTableType) {
         return false
@@ -101,14 +120,14 @@ export function ExcludedRecordsPanel({
 
       return true
     })
-  }, [excludedRecords, filterTableType, searchQuery])
+  }, [relevantExcludedRecords, filterTableType, searchQuery])
 
-  // Get unique table types that have excluded records
+  // Get unique table types that have excluded records (from relevant records only)
   const tableTypesWithRecords = useMemo(() => {
     const types = new Set<ExcludableTableType>()
-    excludedRecords.forEach((record) => types.add(record.tableType))
+    relevantExcludedRecords.forEach((record) => types.add(record.tableType))
     return Array.from(types).sort()
-  }, [excludedRecords])
+  }, [relevantExcludedRecords])
 
   // Clear selection when panel closes
   const handleOpenChange = useCallback((newOpen: boolean) => {
@@ -174,14 +193,14 @@ export function ExcludedRecordsPanel({
     return "indeterminate" as const
   }, [filteredRecords, selectedRows])
 
-  // Count records by table type for display
+  // Count records by table type for display (from relevant records only)
   const countsByType = useMemo(() => {
     const counts: Partial<Record<ExcludableTableType, number>> = {}
-    excludedRecords.forEach((record) => {
+    relevantExcludedRecords.forEach((record) => {
       counts[record.tableType] = (counts[record.tableType] || 0) + 1
     })
     return counts
-  }, [excludedRecords])
+  }, [relevantExcludedRecords])
 
   return (
     <Sheet open={open} onOpenChange={handleOpenChange}>
@@ -195,9 +214,9 @@ export function ExcludedRecordsPanel({
             <SheetTitle className="flex items-center gap-2 text-lg">
               <RotateCcw className="h-5 w-5" />
               Excluded Records
-              {excludedRecords.length > 0 && (
+              {relevantExcludedRecords.length > 0 && (
                 <Badge variant="secondary" className="ml-1">
-                  {excludedRecords.length}
+                  {relevantExcludedRecords.length}
                 </Badge>
               )}
             </SheetTitle>
@@ -230,7 +249,7 @@ export function ExcludedRecordsPanel({
                 <SelectValue placeholder="Filter by type" />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="all">All Tables ({excludedRecords.length})</SelectItem>
+                <SelectItem value="all">All Tables ({relevantExcludedRecords.length})</SelectItem>
                 {tableTypesWithRecords.map((type) => (
                   <SelectItem key={type} value={type}>
                     {tableTypeLabels[type]} ({countsByType[type] || 0})
@@ -248,7 +267,7 @@ export function ExcludedRecordsPanel({
               disabled={isRestoring || loading}
             />
             <div className="text-sm text-muted-foreground">
-              {filteredRecords.length} of {excludedRecords.length} records
+              {filteredRecords.length} of {relevantExcludedRecords.length} records
             </div>
           </div>
 
@@ -286,8 +305,8 @@ export function ExcludedRecordsPanel({
                       <div className="flex flex-col items-center gap-2">
                         <RotateCcw className="h-8 w-8 text-muted-foreground/50" />
                         <p>
-                          {excludedRecords.length === 0 
-                            ? "No records have been excluded yet."
+                          {relevantExcludedRecords.length === 0 
+                            ? "No excluded records in the selected time range."
                             : "No records match your search criteria."}
                         </p>
                       </div>
