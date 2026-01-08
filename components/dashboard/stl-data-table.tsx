@@ -201,6 +201,17 @@ export function STLDataTable({ data, open, onOpenChange }: STLDataTableProps) {
                         has a received date (inbound lead), and has a valid call date (first call that's not a "no dial" result code). 
                         Certain source records are excluded per business rules.
                       </p>
+                      <div>
+                        <p className="mb-1">
+                          <strong>Call Center Business Hours:</strong> The STL calculation only counts time during active business hours:
+                        </p>
+                        <ul className="list-disc list-inside mt-1 ml-2 space-y-1">
+                          <li>Monday - Thursday: 8:30 AM - 7:00 PM</li>
+                          <li>Friday: 8:30 AM - 5:00 PM</li>
+                          <li>Saturday: 10:30 AM - 1:00 PM</li>
+                          <li>Sunday: Closed</li>
+                        </ul>
+                      </div>
                       <p>
                         <strong>Note about 0-second values:</strong> Records with 0 seconds STL time are excluded from the average calculation 
                         shown in the metric card. These occur when the checkout date and call date both fall outside active business hours 
