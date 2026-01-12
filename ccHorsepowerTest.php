@@ -42,6 +42,8 @@ $holidays = [
         // Initialize scorecard arrays for test mode
         $responseData['settersScorecards'] = [];
         $responseData['confirmersScorecards'] = [];
+        $responseData['settersAppointments'] = [];
+        $responseData['secondarySettersAppointments'] = [];
     }else{
         $responseData = [
             'settersCalls' => [],
@@ -866,6 +868,29 @@ $holidays = [
             
             $responseData['confirmersScorecards'][] = $scorecardData;
         }
+
+        // Fetch appointments for setters (for gross issue calculation)
+        $settersAppointmentsQuery = "SELECT app_Appointments.id, app_Appointments.lds_id, app_Appointments.cst_id, app_Appointments.ApptDate, app_Appointments.SetBy, app_Appointments.ApptSet, app_Appointments.Issued, emp_Employees.FirstName, emp_Employees.LastName FROM app_Appointments LEFT JOIN emp_Employees ON app_Appointments.SetBy = emp_Employees.id WHERE app_Appointments.ApptSet = 1 AND app_Appointments.ApptDate BETWEEN '$start' AND '$end' AND (emp_Employees.Dialer = 'True' OR emp_Employees.Dialer = '1') ORDER BY app_Appointments.id DESC";
+        $settersAppointments = curlCall("$endpoint/lp/customReport.php?rptSQL=" . urlencode($settersAppointmentsQuery));
+        
+        // Format appointments data
+        $responseData['settersAppointments'] = [];
+        foreach($settersAppointments as $appointment){
+            $employeeName = null;
+            if(isset($appointment['FirstName']) && isset($appointment['LastName'])){
+                $employeeName = trim($appointment['FirstName']) . " " . trim($appointment['LastName']);
+            }
+            
+            $responseData['settersAppointments'][] = [
+                'id' => $appointment['id'] ?? null,
+                'lds_id' => $appointment['lds_id'] ?? null,
+                'cst_id' => $appointment['cst_id'] ?? null,
+                'employee' => $employeeName,
+                'date' => $appointment['ApptDate'] ?? null,
+                'ApptSet' => $appointment['ApptSet'] ?? null,
+                'Issued' => $appointment['Issued'] ?? null,
+            ];
+        }
     }
 
     // Fetch secondary data for performance metrics if secondaryDateRange is provided
@@ -877,6 +902,7 @@ $holidays = [
     $responseData['secondaryIPPHours'] = [];
     $responseData['secondarySettersScorecards'] = [];
     $responseData['secondaryConfirmersScorecards'] = [];
+    $responseData['secondarySettersAppointments'] = [];
     
     if(array_key_exists('secondaryDateRange', $_GET)){
         // Fetch secondary setters calls
@@ -1207,6 +1233,29 @@ $holidays = [
             $scorecardData['score'] = $score;
             
             $responseData['secondaryConfirmersScorecards'][] = $scorecardData;
+        }
+
+        // Fetch secondary appointments for setters (for gross issue calculation)
+        $secondarySettersAppointmentsQuery = "SELECT app_Appointments.id, app_Appointments.lds_id, app_Appointments.cst_id, app_Appointments.ApptDate, app_Appointments.SetBy, app_Appointments.ApptSet, app_Appointments.Issued, emp_Employees.FirstName, emp_Employees.LastName FROM app_Appointments LEFT JOIN emp_Employees ON app_Appointments.SetBy = emp_Employees.id WHERE app_Appointments.ApptSet = 1 AND app_Appointments.ApptDate BETWEEN '$secondaryStart' AND '$secondaryEnd' AND (emp_Employees.Dialer = 'True' OR emp_Employees.Dialer = '1') ORDER BY app_Appointments.id DESC";
+        $secondarySettersAppointments = curlCall("$endpoint/lp/customReport.php?rptSQL=" . urlencode($secondarySettersAppointmentsQuery));
+        
+        // Format secondary appointments data
+        $responseData['secondarySettersAppointments'] = [];
+        foreach($secondarySettersAppointments as $appointment){
+            $employeeName = null;
+            if(isset($appointment['FirstName']) && isset($appointment['LastName'])){
+                $employeeName = trim($appointment['FirstName']) . " " . trim($appointment['LastName']);
+            }
+            
+            $responseData['secondarySettersAppointments'][] = [
+                'id' => $appointment['id'] ?? null,
+                'lds_id' => $appointment['lds_id'] ?? null,
+                'cst_id' => $appointment['cst_id'] ?? null,
+                'employee' => $employeeName,
+                'date' => $appointment['ApptDate'] ?? null,
+                'ApptSet' => $appointment['ApptSet'] ?? null,
+                'Issued' => $appointment['Issued'] ?? null,
+            ];
         }
     }
     

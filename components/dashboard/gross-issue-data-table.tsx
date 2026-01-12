@@ -17,7 +17,7 @@ import {
   TableRow,
 } from "@/components/ui/table"
 import { Input } from "@/components/ui/input"
-import { ArrowUpDown, ArrowUp, ArrowDown, Info, ChevronDown, ChevronLeft, ChevronRight } from "lucide-react"
+import { ArrowUpDown, ArrowUp, ArrowDown, Info, ChevronDown, ChevronLeft, ChevronRight, ExternalLink } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { format } from "date-fns"
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
@@ -55,6 +55,8 @@ interface GrossIssueRecord {
   ApptSet: number | null
   Issued: number | null
   id?: number | null
+  lds_id?: number | null
+  cst_id?: number | null
 }
 
 interface GrossIssueDataTableProps {
@@ -65,7 +67,7 @@ interface GrossIssueDataTableProps {
   onExcludeRecords?: (recordIds: string[]) => void
 }
 
-type SortField = "employee" | "date" | "ApptSet" | "Issued" | "id"
+type SortField = "employee" | "date" | "ApptSet" | "Issued" | "lds_id" | "cst_id"
 type SortDirection = "asc" | "desc" | null
 
 export function GrossIssueDataTable({ 
@@ -131,7 +133,8 @@ export function GrossIssueDataTable({
       const formattedDate = formattedDates.get(record.date) ?? formatDate(record.date)
       return (
         (record.employee?.toLowerCase() ?? "").includes(query) ||
-        (record.id?.toString() ?? "").includes(query) ||
+        (record.lds_id?.toString() ?? "").includes(query) ||
+        (record.cst_id?.toString() ?? "").includes(query) ||
         formattedDate.toLowerCase().includes(query) ||
         (record.Issued != null && record.Issued > 0 ? "yes" : "no").includes(query)
       )
@@ -310,7 +313,7 @@ export function GrossIssueDataTable({
         <DialogHeader className="px-6 pt-6 pb-4">
           <DialogTitle>Gross Issue - Data Table</DialogTitle>
           <DialogDescription>
-            View and search all calls where an appointment was set (ApptSet &gt; 0) with their issue status. Click column headers to sort.
+            View and search all appointments where an appointment was set (ApptSet &gt; 0) with their issue status. Click column headers to sort.
           </DialogDescription>
         </DialogHeader>
 
@@ -352,11 +355,11 @@ export function GrossIssueDataTable({
                   <AlertDescription>
                     <div className="space-y-2 pt-2">
                       <p>
-                        <strong>What's included:</strong> This table shows all calls where an appointment was set (ApptSet &gt; 0) within the selected date range and filters. 
+                        <strong>What's included:</strong> This table shows all appointments where an appointment was set (ApptSet &gt; 0) within the selected date range and filters. 
                         The gross issue rate is calculated as: (Total Issued ÷ Total ApptSet) × 100.
                       </p>
                       <p>
-                        <strong>Issue Status:</strong> A call is considered issued when Issued &gt; 0. This indicates whether an issue occurred for an appointment that was set.
+                        <strong>Issue Status:</strong> An appointment is considered issued when Issued &gt; 0. This indicates whether an issue occurred for an appointment that was set.
                       </p>
                     </div>
                   </AlertDescription>
@@ -368,7 +371,7 @@ export function GrossIssueDataTable({
           {/* Search Input and Actions */}
           <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
             <Input
-              placeholder="Search by employee, date, call ID, or issue status..."
+              placeholder="Search by employee, date, lead ID, customer ID, or issue status..."
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
               className="w-full"
@@ -437,10 +440,21 @@ export function GrossIssueDataTable({
                       variant="ghost"
                       size="sm"
                       className="h-8 -ml-2"
-                      onClick={() => handleSort("id")}
+                      onClick={() => handleSort("lds_id")}
                     >
-                      Call ID
-                      {getSortIcon("id")}
+                      Lead ID
+                      {getSortIcon("lds_id")}
+                    </Button>
+                  </TableHead>
+                  <TableHead className="w-[120px] hidden sm:table-cell">
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="h-8 -ml-2"
+                      onClick={() => handleSort("cst_id")}
+                    >
+                      Customer ID
+                      {getSortIcon("cst_id")}
                     </Button>
                   </TableHead>
                   {onExcludeRecords && (
@@ -451,7 +465,7 @@ export function GrossIssueDataTable({
               <TableBody>
                 {filteredAndSortedData.length === 0 ? (
                   <TableRow>
-                    <TableCell colSpan={onExcludeRecords ? 6 : 4} className="text-center py-8 text-muted-foreground">
+                    <TableCell colSpan={onExcludeRecords ? 7 : 5} className="text-center py-8 text-muted-foreground">
                       {searchQuery ? "No records found matching your search." : "No data available."}
                     </TableCell>
                   </TableRow>
@@ -468,7 +482,7 @@ export function GrossIssueDataTable({
                               checked={isSelected}
                               onCheckedChange={(checked) => handleSelectRow(recordId, checked)}
                               disabled={!recordId}
-                              ariaLabel={`Select call ${record.id}`}
+                              ariaLabel={`Select appointment ${record.id}`}
                             />
                           </TableCell>
                         )}
@@ -486,7 +500,22 @@ export function GrossIssueDataTable({
                           )}
                         </TableCell>
                         <TableCell className="text-sm text-muted-foreground hidden sm:table-cell">
-                          {record.id ?? "N/A"}
+                          {record.lds_id ?? "N/A"}
+                        </TableCell>
+                        <TableCell className="text-sm hidden sm:table-cell">
+                          {record.cst_id ? (
+                            <a
+                              href={`https://qi09a.leadperfection.com/LeadDetail.html?custid=${record.cst_id}`}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="text-blue-600 hover:text-blue-800 dark:text-blue-400 dark:hover:text-blue-300 hover:underline inline-flex items-center gap-1"
+                            >
+                              {record.cst_id}
+                              <ExternalLink className="h-3 w-3" />
+                            </a>
+                          ) : (
+                            <span className="text-muted-foreground">N/A</span>
+                          )}
                         </TableCell>
                         {onExcludeRecords && (
                           <TableCell>
