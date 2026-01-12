@@ -291,7 +291,7 @@ const buildApiUrl = (
   secondaryDateRange?: string,
   secondaryCustomRange?: { from: Date | undefined; to?: Date | undefined }
 ) => {
-  const baseUrl = 'https://api.integrityprodserver.com/dashboards/ccHorsepowerTest.php'
+  const baseUrl = 'https://api.integrityprodserver.com/dashboards/ccHorsepower.php'
   const params = new URLSearchParams({ dateRange })
   
   if (dateRange === 'Custom Dates' && customRange?.from && customRange?.to) {
@@ -514,7 +514,11 @@ const transformApiData = (
       filteredAppointments = filteredAppointments.filter((apt: any) => !excludedIds.grossIssue.has(String(apt.id)))
     }
     
+    // Filter to only appointments where ApptSet > 0 (same as table)
+    filteredAppointments = filteredAppointments.filter((apt: any) => apt.ApptSet != null && apt.ApptSet > 0)
+    
     // Calculate totalAppointments and totalIssued from appointments
+    // Gross Issue Rate = (Total Issued / Total Appointments) * 100
     totalAppointments = filteredAppointments.length
     totalIssuedFromAppointments = filteredAppointments.filter((apt: any) => apt.Issued != null && apt.Issued > 0).length
   }
@@ -1068,7 +1072,7 @@ export function DashboardContent() {
     
     const appointmentsKey = 'secondarySettersAppointments'
     const allAppointments = rawData[appointmentsKey] || []
-    
+
     // Filter appointments by selected employees
     let filteredAppointments = allAppointments
     if (selectedEmployees.length > 0) {
@@ -1081,9 +1085,11 @@ export function DashboardContent() {
       date: apt.date || null,
       ApptSet: apt.ApptSet ?? null,
       Issued: apt.Issued ?? null,
+      NetIssued: apt.NetIssued ?? null,
       id: apt.id ?? null,
       lds_id: apt.lds_id ?? null,
       cst_id: apt.cst_id ?? null,
+      dsp_id: apt.dsp_id ?? null,
     }))
   })() : []
 
@@ -2309,6 +2315,9 @@ export function DashboardContent() {
             onOpenChange={setGrossIssueTableOpen}
             excludedIds={getExcludedIdsForTable("grossIssue")}
             onExcludeRecords={(ids) => excludeRecords("grossIssue", ids)}
+            timePeriod={secondaryTimePeriod}
+            dateRange={secondaryConfirmedDateRange}
+            timeRange={secondaryConfirmedTimeRange}
           />
         </>
       )}
