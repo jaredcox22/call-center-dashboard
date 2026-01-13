@@ -436,11 +436,19 @@ if ($_SERVER['REQUEST_METHOD'] == 'OPTIONS') {
 			$calculatedStart = "$startDate " . $ccHours[$startDOW]['start'];
 		}
 		
-		$startDOW = date('w', strtotime($calculatedStart));
+		$calculatedStartTs = strtotime($calculatedStart);
+		$endTs = strtotime($end);
+
+		// If the call happened before the next valid business start window, no wait time
+		if ($endTs <= $calculatedStartTs) {
+			return 0;
+		}
+
+		$startDOW = date('w', $calculatedStartTs);
 		$startDate = date('Y-m-d', strtotime($calculatedStart));
 	
-		$endDOW = date('w', strtotime($end));
-		$endDate = date('Y-m-d', strtotime($end));
+		$endDOW = date('w', $endTs);
+		$endDate = date('Y-m-d', $endTs);
 	
 		if($startDOW == $endDOW){
 			$difference = strtotime($end) - strtotime($calculatedStart);

@@ -1659,22 +1659,60 @@ $holidays = [
 			$calculatedStart = "$startDate " . $ccHours[$startDOW]['start'];
 		}
 		
-		$startDOW = date('w', strtotime($calculatedStart));
+		$calculatedStartTs = strtotime($calculatedStart);
+		$endTs = strtotime($end);
+
+		// If the call happened before the next valid start window, treat as zero wait time
+		if ($endTs <= $calculatedStartTs) {
+			return 0;
+		}
+
+		$startDOW = date('w', $calculatedStartTs);
 		$startDate = date('Y-m-d', strtotime($calculatedStart));
 	
-		$endDOW = date('w', strtotime($end));
-		$endDate = date('Y-m-d', strtotime($end));
+		$endDOW = date('w', $endTs);
+		$endDate = date('Y-m-d', $endTs);
 	
 		if($startDOW == $endDOW){
 			// Same day - check if it's a holiday
 			if(isHoliday($startDate)){
 				$difference = 0;
 			}else{
-				$difference = strtotime($end) - strtotime($calculatedStart);
+				// Check if call time is within business hours
+				if(array_key_exists($endDOW, $ccHours)){
+					$endDayStart = strtotime("$endDate " . $ccHours[$endDOW]['start']);
+					$endDayEnd = strtotime("$endDate " . $ccHours[$endDOW]['end']);
+					$endTime = $endTs;
+					$calculatedStartTime = $calculatedStartTs;
+					
+					// Ensure we don't count time before business hours start
+					$actualStart = max($calculatedStartTime, $endDayStart);
+					
+					if($endTime <= $endDayStart){
+						// Call was before business hours started - no time counted
+						$difference = 0;
+					}else if($endTime >= $endDayEnd){
+						// Call was after business hours ended - cap at end of business day
+						$difference = $endDayEnd - $actualStart;
+					}else{
+						// Call was during business hours
+						$difference = $endTime - $actualStart;
+					}
+				}else{
+					// Not a business day
+					$difference = 0;
+				}
 			}
 		}else{
 			//Get the seconds between the start date and when the CC closed
-			$difference = strtotime("$startDate " . $ccHours[$startDOW]['end']) - strtotime($calculatedStart);
+			$startDayEnd = strtotime("$startDate " . $ccHours[$startDOW]['end']);
+			$calculatedStartTime = strtotime($calculatedStart);
+			// Only count time if calculatedStart is before end of business hours
+			if($calculatedStartTime < $startDayEnd){
+				$difference = $startDayEnd - $calculatedStartTime;
+			}else{
+				$difference = 0;
+			}
 	
 			$startDate = date('Y-m-d', strtotime("$startDate + 1 day"));
 			$startDOW = date('w', strtotime($startDate));
