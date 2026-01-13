@@ -494,9 +494,38 @@ const transformApiData = (
   const totalQualifiedConversions = pitchedCalls.filter((c: any) => c.qualified === true && c.positive === 1).length
   const totalUnqualifiedConversions = pitchedCalls.filter((c: any) => c.qualified === false && c.positive === 1).length
   
-  // Calculate totalApptSet and totalIssued (count calls where ApptSet > 0 and Issued > 0)
+  // Get appointments data for gross issue calculation (only for setters dashboard)
+  let allAppointments: any[] = []
+  let filteredAppointments: any[] = []
+  let totalAppointments = 0
+  let totalIssuedFromAppointments = 0
+  
+  if (dashboardType === 'setters') {
+    allAppointments = apiData.settersAppointments || []
+    
+    // Filter appointments by selected employees
+    filteredAppointments = allAppointments
+    if (selectedEmployees.length > 0) {
+      filteredAppointments = allAppointments.filter((apt: any) => selectedEmployees.includes(apt.employee))
+    }
+    
+    // Filter out excluded appointment records
+    if (excludedIds && excludedIds.grossIssue.size > 0) {
+      filteredAppointments = filteredAppointments.filter((apt: any) => !excludedIds.grossIssue.has(String(apt.id)))
+    }
+    
+    // Filter to only appointments where ApptSet > 0 (same as table)
+    filteredAppointments = filteredAppointments.filter((apt: any) => apt.ApptSet != null && apt.ApptSet > 0)
+    
+    // Calculate totalAppointments and totalIssued from appointments
+    // Gross Issue Rate = (Total Issued / Total Appointments) * 100
+    totalAppointments = filteredAppointments.length
+    totalIssuedFromAppointments = filteredAppointments.filter((apt: any) => apt.Issued != null && apt.Issued > 0).length
+  }
+  
+  // Calculate totalApptSet and totalIssued from calls (for confirmers dashboard and backward compatibility)
   const totalApptSet = filteredCalls.filter((c: any) => c.ApptSet != null && c.ApptSet > 0).length
-  const totalIssued = filteredCalls.filter((c: any) => c.Issued != null && c.Issued > 0).length
+  const totalIssuedFromCalls = filteredCalls.filter((c: any) => c.Issued != null && c.Issued > 0).length
   
   // Calculate total hours (using adjusted hours if time range is provided)
   const totalHours: number = Array.from(hoursByEmployee.values()).reduce((sum: number, hours: number) => sum + hours, 0)
@@ -515,7 +544,10 @@ const transformApiData = (
   const conversionRate = totalPitched > 0 ? Math.round((totalPositive / totalPitched) * 100) : 0
   const conversionQualified = totalQualified > 0 ? Math.round((totalQualifiedConversions / totalQualified) * 100) : 0
   const conversionUnqualified = totalUnqualified > 0 ? Math.round((totalUnqualifiedConversions / totalUnqualified) * 100) : 0
-  const grossIssue = totalApptSet > 0 ? Math.round((totalIssued / totalApptSet) * 100) : 0
+  // Calculate grossIssue from appointments (for setters) or calls (for confirmers)
+  const grossIssue = dashboardType === 'setters' 
+    ? (totalAppointments > 0 ? Math.round((totalIssuedFromAppointments / totalAppointments) * 100) : 0)
+    : (totalApptSet > 0 ? Math.round((totalIssuedFromCalls / totalApptSet) * 100) : 0)
   
   // Calculate scorecard percentage: sum of actualTotals / sum of maxTotals * 100
   let scoreCard = 0
@@ -568,12 +600,12 @@ const transformApiData = (
   
   // Gross Issue Rate: percentage of appointments set that resulted in issues
   const grossIssueRate = hasConfirmersData && totalApptSet > 0
-    ? Math.round((totalIssued / totalApptSet) * 100)
+    ? Math.round((totalIssuedFromCalls / totalApptSet) * 100)
     : 0
-  
+
   // Net Issue Rate: percentage of connected calls that resulted in issues
   const netIssueRate = hasConfirmersData && totalConnected > 0
-    ? Math.round((totalIssued / totalConnected) * 100)
+    ? Math.round((totalIssuedFromCalls / totalConnected) * 100)
     : 0
   
   // 1-Leg Rate: percentage of calls that resulted in a pitch (successful contact and pitch)
@@ -750,6 +782,7 @@ export function DashboardContent() {
       IPPHours: rawData.secondaryIPPHours || [],
       settersScorecards: rawData.secondarySettersScorecards || [],
       confirmersScorecards: rawData.secondaryConfirmersScorecards || [],
+      settersAppointments: rawData.secondarySettersAppointments || [],
       stl: [], // STL is team-wide, not needed for secondary metrics
     },
     selectedEmployees,
@@ -1011,27 +1044,6 @@ export function DashboardContent() {
     }))
   })() : []
 
-  // Filter calls for gross issue data table (calls where ApptSet > 0)
-  const filteredGrossIssueCalls = rawData ? (() => {
-    if (dashboardType !== 'setters') return []
-    
-    const callsKey = 'settersCalls'
-    const allCalls = rawData[callsKey] || []
-    const filteredCalls = getFilteredCalls(allCalls)
-    
-    // Filter to only calls where ApptSet > 0
-    const apptSetCalls = filteredCalls.filter((call: any) => call.ApptSet != null && call.ApptSet > 0)
-    
-    // Transform to GrossIssueDataTable format
-    return apptSetCalls.map((call: any) => ({
-      employee: call.employee || '',
-      date: call.date || null,
-      ApptSet: call.ApptSet ?? null,
-      Issued: call.Issued ?? null,
-      id: call.id ?? null,
-    }))
-  })() : []
-
   // Filter pitched calls for performance metrics tables (using secondary date range)
   const filteredSecondaryPitchedCalls = rawData ? (() => {
     if (dashboardType !== 'setters') return []
@@ -1054,24 +1066,30 @@ export function DashboardContent() {
     }))
   })() : []
 
-  // Filter calls for gross issue data table using secondary date range
-  const filteredSecondaryGrossIssueCalls = rawData ? (() => {
+  // Filter appointments for gross issue data table using secondary date range
+  const filteredSecondaryGrossIssueAppointments = rawData ? (() => {
     if (dashboardType !== 'setters') return []
     
-    const callsKey = 'secondarySettersCalls'
-    const allCalls = rawData[callsKey] || []
-    const filteredCalls = getFilteredSecondaryCalls(allCalls)
-    
-    // Filter to only calls where ApptSet > 0
-    const apptSetCalls = filteredCalls.filter((call: any) => call.ApptSet != null && call.ApptSet > 0)
+    const appointmentsKey = 'secondarySettersAppointments'
+    const allAppointments = rawData[appointmentsKey] || []
+
+    // Filter appointments by selected employees
+    let filteredAppointments = allAppointments
+    if (selectedEmployees.length > 0) {
+      filteredAppointments = allAppointments.filter((apt: any) => selectedEmployees.includes(apt.employee))
+    }
     
     // Transform to GrossIssueDataTable format
-    return apptSetCalls.map((call: any) => ({
-      employee: call.employee || '',
-      date: call.date || null,
-      ApptSet: call.ApptSet ?? null,
-      Issued: call.Issued ?? null,
-      id: call.id ?? null,
+    return filteredAppointments.map((apt: any) => ({
+      employee: apt.employee || '',
+      date: apt.date || null,
+      ApptSet: apt.ApptSet ?? null,
+      Issued: apt.Issued ?? null,
+      NetIssued: apt.NetIssued ?? null,
+      id: apt.id ?? null,
+      lds_id: apt.lds_id ?? null,
+      cst_id: apt.cst_id ?? null,
+      dsp_id: apt.dsp_id ?? null,
     }))
   })() : []
 
@@ -1098,7 +1116,7 @@ export function DashboardContent() {
     dialsPerHour: new Set<string>(dialsPerHourTableData.filter((r: any) => r.id != null).map((r: any) => String(r.id))),
     conversionQualified: new Set<string>(filteredSecondaryPitchedCalls.filter((r: any) => r.id != null).map((r: any) => String(r.id))),
     conversionUnqualified: new Set<string>(filteredSecondaryPitchedCalls.filter((r: any) => r.id != null).map((r: any) => String(r.id))),
-    grossIssue: new Set<string>(filteredSecondaryGrossIssueCalls.filter((r: any) => r.id != null).map((r: any) => String(r.id))),
+    grossIssue: new Set<string>(filteredSecondaryGrossIssueAppointments.filter((r: any) => r.id != null).map((r: any) => String(r.id))),
   }
 
   // Count excluded records that are relevant to the current time range
@@ -2292,11 +2310,14 @@ export function DashboardContent() {
             onExcludeRecords={(ids) => excludeRecords("conversionUnqualified", ids)}
           />
           <GrossIssueDataTable
-            data={filteredSecondaryGrossIssueCalls}
+            data={filteredSecondaryGrossIssueAppointments}
             open={grossIssueTableOpen}
             onOpenChange={setGrossIssueTableOpen}
             excludedIds={getExcludedIdsForTable("grossIssue")}
             onExcludeRecords={(ids) => excludeRecords("grossIssue", ids)}
+            timePeriod={secondaryTimePeriod}
+            dateRange={secondaryConfirmedDateRange}
+            timeRange={secondaryConfirmedTimeRange}
           />
         </>
       )}

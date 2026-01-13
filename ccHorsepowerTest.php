@@ -42,6 +42,8 @@ $holidays = [
         // Initialize scorecard arrays for test mode
         $responseData['settersScorecards'] = [];
         $responseData['confirmersScorecards'] = [];
+        $responseData['settersAppointments'] = [];
+        $responseData['secondarySettersAppointments'] = [];
     }else{
         $responseData = [
             'settersCalls' => [],
@@ -201,33 +203,27 @@ $holidays = [
     if(array_key_exists('test', $_GET)){
 
     }else{
-        // Get all calls first (both setters and confirmers based on cty_id)
-        $settersCallsQuery = "SELECT emp_user_12, LastName, cls_Calls.id as id, FirstName, CallDate, ResultCode, cty_id, Connected, Pitched, Positive, qualified, lds_Leads.ApptSet, lds_Leads.Issued FROM cls_Calls LEFT JOIN clr_CallResults ON ResultCode = clr_CallResults.id LEFT JOIN emp_Employees ON emp_id = emp_Employees.id LEFT JOIN lds_Leads ON cls_Calls.lds_id = lds_Leads.id LEFT JOIN srs_SourceSubs ON lds_Leads.srs_id = srs_SourceSubs.id WHERE CallDate BETWEEN '$start' AND '$end' AND ResultCode NOT LIKE '%ND%' AND Dialer = 'True' AND emp_user_12 > 0 AND cty_id NOT IN ('C', 'IPP')";
-        $settersCalls = curlCall("$endpoint/lp/customReport.php?rptSQL=" . urlencode($settersCallsQuery));
-
-        $confirmersCallsQuery = "SELECT emp_user_12, LastName, cls_Calls.id as id, FirstName, CallDate, ResultCode, cty_id, Connected, Pitched, Positive, qualified, lds_Leads.ApptSet, lds_Leads.Issued FROM cls_Calls LEFT JOIN clr_CallResults ON ResultCode = clr_CallResults.id LEFT JOIN emp_Employees ON emp_id = emp_Employees.id LEFT JOIN lds_Leads ON cls_Calls.lds_id = lds_Leads.id LEFT JOIN srs_SourceSubs ON lds_Leads.srs_id = srs_SourceSubs.id WHERE CallDate BETWEEN '$start' AND '$end' AND ResultCode NOT LIKE '%ND%' AND Dialer = 'True' AND emp_user_12 > 0 AND cty_id = 'C'";
-        $confirmersCalls = curlCall("$endpoint/lp/customReport.php?rptSQL=" . urlencode($confirmersCallsQuery));
-
-        $ippCallsQuery = "SELECT emp_user_12, LastName, cls_Calls.id as id, FirstName, CallDate, ResultCode, cty_id, Connected, Pitched, Positive, qualified, lds_Leads.ApptSet, lds_Leads.Issued FROM cls_Calls LEFT JOIN clr_CallResults ON ResultCode = clr_CallResults.id LEFT JOIN emp_Employees ON emp_id = emp_Employees.id LEFT JOIN lds_Leads ON cls_Calls.lds_id = lds_Leads.id LEFT JOIN srs_SourceSubs ON lds_Leads.srs_id = srs_SourceSubs.id WHERE CallDate BETWEEN '$start' AND '$end' AND ResultCode NOT LIKE '%ND%' AND Dialer = 'True' AND emp_user_12 > 0 AND cty_id = 'IPP'";
-        $ippCalls = curlCall("$endpoint/lp/customReport.php?rptSQL=" . urlencode($ippCallsQuery));
-        // Collect all deputy IDs from all calls
+        // STEP 1: Get unique deputy IDs and build Deputy-to-LP mapping from a lightweight query
+        // This query gets all unique combinations of deputy ID and LP employee ID
+        $deputyMappingQuery = "SELECT DISTINCT emp_user_12, emp_id, FirstName, LastName FROM cls_Calls LEFT JOIN emp_Employees ON emp_id = emp_Employees.id WHERE CallDate BETWEEN '$start' AND '$end' AND ResultCode NOT LIKE '%ND%' AND Dialer = 'True' AND emp_user_12 > 0";
+        $deputyMappingResults = curlCall("$endpoint/lp/customReport.php?rptSQL=" . urlencode($deputyMappingQuery));
+        
+        // Build mapping of Deputy ID to LP employee ID and collect all deputy IDs
+        $deputyToLPMapping = [];
+        $deputyToNameMapping = [];
         $deputyIDs = [];
-        foreach($settersCalls as $call){
-            if(!in_array($call['emp_user_12'], $deputyIDs)){
-                $deputyIDs[] = $call['emp_user_12'];
+        foreach($deputyMappingResults as $row){
+            if(isset($row['emp_user_12']) && isset($row['emp_id'])){
+                $deputyID = intval($row['emp_user_12']);
+                $deputyToLPMapping[$deputyID] = intval($row['emp_id']);
+                $deputyToNameMapping[$deputyID] = trim($row['FirstName'] . ' ' . $row['LastName']);
+                if(!in_array($deputyID, $deputyIDs)){
+                    $deputyIDs[] = $deputyID;
+                }
             }
         }
-        foreach($confirmersCalls as $call){
-            if(!in_array($call['emp_user_12'], $deputyIDs)){
-                $deputyIDs[] = $call['emp_user_12'];
-            }
-        }
-        foreach($ippCalls as $call){
-            if(!in_array($call['emp_user_12'], $deputyIDs)){
-                $deputyIDs[] = $call['emp_user_12'];
-            }
-        }
-        // Fetch timesheets for all deputy IDs to determine their operational unit and calculate hours
+        
+        // STEP 2: Fetch timesheets for all deputy IDs to determine their operational unit and calculate hours
         $timesheets = [];
         $timesheetEmployees = [];
         $settersTimesheetEmployees = []; // Hours for employees clocked into Setter operational unit
@@ -264,8 +260,10 @@ $holidays = [
                     stripos($operationalUnitName, 'Confirmer') !== false
                 );
                 $isIPPOperationalUnit = $operationalUnitName && (
+                    $operationalUnitName === 'IPP' ||
                     $operationalUnitName === 'IPP Dialing - Office' ||
-                    stripos($operationalUnitName, 'IPP Dialing') !== false
+                    stripos($operationalUnitName, 'IPP Dialing') !== false ||
+                    stripos($operationalUnitName, 'IPP') !== false
                 );
                 
                 if($timesheet['IsInProgress']){
@@ -327,7 +325,7 @@ $holidays = [
             }
         }
         
-        // Classify deputy IDs based on operational unit
+        // STEP 3: Classify deputy IDs based on operational unit
         $settersDeputyIDs = [];
         $confirmersDeputyIDs = [];
         $ippDeputyIDs = [];
@@ -344,12 +342,12 @@ $holidays = [
                     if($unitName === 'Confirmer' || $unitName === 'Confirmer - Office' || stripos($unitName, 'Confirmer') !== false){
                         $hasConfirmerUnit = true;
                     }
-                    if($unitName === 'IPP Dialing - Office' || stripos($unitName, 'IPP Dialing') !== false){
+                    if($unitName === 'IPP' || $unitName === 'IPP Dialing - Office' || stripos($unitName, 'IPP Dialing') !== false || stripos($unitName, 'IPP') !== false){
                         $hasIPPUnit = true;
                     }
                 }
             }
-            // Classify based on operational unit (priority: Setter > Confirmer > IPP)
+            // Classify based on operational unit
             if($hasSetterUnit){
                 $settersDeputyIDs[] = $deputyID;
             } 
@@ -358,11 +356,14 @@ $holidays = [
             }
             if($hasIPPUnit){
                 $ippDeputyIDs[] = $deputyID;
-            } else {
-                // If no operational unit found, default to setter (backward compatibility)
-                $settersDeputyIDs[] = $deputyID;
             }
         }
+        
+        // Make deputy ID arrays unique
+        $settersDeputyIDs = array_unique($settersDeputyIDs);
+        $confirmersDeputyIDs = array_unique($confirmersDeputyIDs);
+        $ippDeputyIDs = array_unique($ippDeputyIDs);
+        
         // DEBUG: Track employee types
         $debugInfo = [
             'settersDeputyIDs' => $settersDeputyIDs,
@@ -378,13 +379,35 @@ $holidays = [
             'finalHoursBreakdown' => []
         ];
 
-        // Process setters calls - only include if deputy ID is classified as setter
+        // STEP 4: Fetch calls filtered by classified deputy IDs (at SQL level)
+        $settersCalls = [];
+        $confirmersCalls = [];
+        $ippCalls = [];
+        
+        // Fetch setters calls - only for employees clocked into Setter operational unit
+        if(!empty($settersDeputyIDs)){
+            $settersDeputyIdsList = implode(',', $settersDeputyIDs);
+            $settersCallsQuery = "SELECT emp_user_12, emp_id, LastName, cls_Calls.id as id, FirstName, CallDate, ResultCode, cty_id, Connected, Pitched, Positive, qualified, lds_Leads.ApptSet, lds_Leads.Issued FROM cls_Calls LEFT JOIN clr_CallResults ON ResultCode = clr_CallResults.id LEFT JOIN emp_Employees ON emp_id = emp_Employees.id LEFT JOIN lds_Leads ON cls_Calls.lds_id = lds_Leads.id LEFT JOIN srs_SourceSubs ON lds_Leads.srs_id = srs_SourceSubs.id WHERE CallDate BETWEEN '$start' AND '$end' AND ResultCode NOT LIKE '%ND%' AND Dialer = 'True' AND emp_user_12 IN ($settersDeputyIdsList) AND cty_id NOT IN ('C', 'IPP')";
+            $settersCalls = curlCall("$endpoint/lp/customReport.php?rptSQL=" . urlencode($settersCallsQuery));
+        }
+        
+        // Fetch confirmers calls - only for employees clocked into Confirmer operational unit
+        if(!empty($confirmersDeputyIDs)){
+            $confirmersDeputyIdsList = implode(',', $confirmersDeputyIDs);
+            $confirmersCallsQuery = "SELECT emp_user_12, emp_id, LastName, cls_Calls.id as id, FirstName, CallDate, ResultCode, cty_id, Connected, Pitched, Positive, qualified, lds_Leads.ApptSet, lds_Leads.Issued FROM cls_Calls LEFT JOIN clr_CallResults ON ResultCode = clr_CallResults.id LEFT JOIN emp_Employees ON emp_id = emp_Employees.id LEFT JOIN lds_Leads ON cls_Calls.lds_id = lds_Leads.id LEFT JOIN srs_SourceSubs ON lds_Leads.srs_id = srs_SourceSubs.id WHERE CallDate BETWEEN '$start' AND '$end' AND ResultCode NOT LIKE '%ND%' AND Dialer = 'True' AND emp_user_12 IN ($confirmersDeputyIdsList) AND cty_id = 'C'";
+            $confirmersCalls = curlCall("$endpoint/lp/customReport.php?rptSQL=" . urlencode($confirmersCallsQuery));
+        }
+        
+        // Fetch IPP calls - only for employees clocked into IPP operational unit
+        if(!empty($ippDeputyIDs)){
+            $ippDeputyIdsList = implode(',', $ippDeputyIDs);
+            $ippCallsQuery = "SELECT emp_user_12, emp_id, LastName, cls_Calls.id as id, FirstName, CallDate, ResultCode, cty_id, Connected, Pitched, Positive, qualified, lds_Leads.ApptSet, lds_Leads.Issued FROM cls_Calls LEFT JOIN clr_CallResults ON ResultCode = clr_CallResults.id LEFT JOIN emp_Employees ON emp_id = emp_Employees.id LEFT JOIN lds_Leads ON cls_Calls.lds_id = lds_Leads.id LEFT JOIN srs_SourceSubs ON lds_Leads.srs_id = srs_SourceSubs.id WHERE CallDate BETWEEN '$start' AND '$end' AND ResultCode NOT LIKE '%ND%' AND Dialer = 'True' AND emp_user_12 IN ($ippDeputyIdsList) AND cty_id = 'IPP'";
+            $ippCalls = curlCall("$endpoint/lp/customReport.php?rptSQL=" . urlencode($ippCallsQuery));
+        }
+
+        // STEP 5: Process setters calls (already filtered by operational unit at SQL level)
         foreach($settersCalls as $call){
             $deputyID = $call['emp_user_12'];
-            // Only include if this deputy ID is classified as a setter based on operational unit
-            if(!in_array($deputyID, $settersDeputyIDs)){
-                continue;
-            }
             if(!array_key_exists(intval($deputyID), $timesheetEmployees)){
                 continue;
             }
@@ -414,13 +437,9 @@ $holidays = [
             ];
         }
 
-        // Process confirmers calls - only include if deputy ID is classified as confirmer
+        // Process confirmers calls (already filtered by operational unit at SQL level)
         foreach($confirmersCalls as $call){
             $deputyID = $call['emp_user_12'];
-            // Only include if this deputy ID is classified as a confirmer based on operational unit
-            if(!in_array($deputyID, $confirmersDeputyIDs)){
-                continue;
-            }
             if(!array_key_exists(intval($deputyID), $timesheetEmployees)){
                 continue;
             }
@@ -451,13 +470,9 @@ $holidays = [
             ];
         }
 
-        // Process IPP calls - only include if deputy ID is classified as IPP
+        // Process IPP calls (already filtered by operational unit at SQL level)
         foreach($ippCalls as $call){
             $deputyID = $call['emp_user_12'];
-            // Only include if this deputy ID is classified as IPP based on operational unit
-            if(!in_array($deputyID, $ippDeputyIDs)){
-                continue;
-            }
             if(!array_key_exists(intval($deputyID), $timesheetEmployees)){
                 continue;
             }
@@ -555,11 +570,20 @@ $holidays = [
                 if(isset($timesheetEmployees[$empID]['employee'])){
                     $ippTimesheetEmployees[$empID]['employee'] = $timesheetEmployees[$empID]['employee'];
                 } else {
-                    // Try to get name from setters calls
-                    foreach($settersCalls as $call){
+                    // Try to get name from IPP calls first (most relevant)
+                    foreach($ippCalls as $call){
                         if(intval($call['emp_user_12']) == $empID){
                             $ippTimesheetEmployees[$empID]['employee'] = $call['FirstName'] . " " . $call['LastName'];
                             break;
+                        }
+                    }
+                    // If still not found, try setters calls
+                    if(!isset($ippTimesheetEmployees[$empID]['employee'])){
+                        foreach($settersCalls as $call){
+                            if(intval($call['emp_user_12']) == $empID){
+                                $ippTimesheetEmployees[$empID]['employee'] = $call['FirstName'] . " " . $call['LastName'];
+                                break;
+                            }
                         }
                     }
                     // If still not found, try confirmers calls
@@ -570,6 +594,10 @@ $holidays = [
                                 break;
                             }
                         }
+                    }
+                    // If still not found, try to get from deputy mapping
+                    if(!isset($ippTimesheetEmployees[$empID]['employee']) && isset($deputyToNameMapping[$empID])){
+                        $ippTimesheetEmployees[$empID]['employee'] = $deputyToNameMapping[$empID];
                     }
                 }
             }
@@ -866,6 +894,48 @@ $holidays = [
             
             $responseData['confirmersScorecards'][] = $scorecardData;
         }
+
+        // Get LP employee IDs for employees clocked into Setter operational unit
+        $setterLPEmployeeIds = [];
+        foreach(array_keys($settersTimesheetEmployees) as $deputyID){
+            if(isset($deputyToLPMapping[$deputyID])){
+                $setterLPEmployeeIds[] = $deputyToLPMapping[$deputyID];
+            }
+        }
+        $setterLPEmployeeIds = array_unique($setterLPEmployeeIds);
+        
+        // Fetch appointments for setters (for gross issue calculation)
+        // Only include appointments where SetBy is an employee clocked into Setter operational unit
+        $settersAppointments = [];
+        if(!empty($setterLPEmployeeIds)){
+            $setterLPEmployeeIdsList = implode(',', $setterLPEmployeeIds);
+            $settersAppointmentsQuery = "SELECT app_Appointments.id, app_Appointments.lds_id, app_Appointments.cst_id, app_Appointments.ApptDate, app_Appointments.Dsp_ID, app_Appointments.SetBy, app_Appointments.ApptSet, app_Appointments.Issued, app_Appointments.NetIssued, emp_Employees.FirstName, emp_Employees.LastName FROM app_Appointments LEFT JOIN emp_Employees ON app_Appointments.SetBy = emp_Employees.id WHERE app_Appointments.ApptDate BETWEEN '$start' AND '$end' AND emp_Employees.Dialer = '1' AND Dsp_ID NOT IN ('Set') AND ApptSet = '1' ORDER BY app_Appointments.id DESC";
+            $settersAppointments = curlCall("$endpoint/lp/customReport.php?rptSQL=" . urlencode($settersAppointmentsQuery));
+        }
+        
+        // Format appointments data
+        $responseData['settersAppointments'] = [];
+        foreach($settersAppointments as $appointment){
+            $employeeName = null;
+            if(isset($appointment['FirstName']) && isset($appointment['LastName'])){
+                $employeeName = trim($appointment['FirstName']) . " " . trim($appointment['LastName']);
+            }
+            
+            $responseData['settersAppointments'][] = [
+                'id' => $appointment['id'] ?? null,
+                'lds_id' => $appointment['lds_id'] ?? null,
+                'cst_id' => $appointment['cst_id'] ?? null,
+                'dsp_id' => $appointment['Dsp_ID'] ?? null,
+                'employee' => $employeeName,
+                'date' => $appointment['ApptDate'] ?? null,
+                'ApptSet' => $appointment['ApptSet'] ?? null,
+                'Issued' => $appointment['Issued'] ?? null,
+                'NetIssued' => $appointment['NetIssued'] ?? null,
+            ];
+        }
+        
+        // Store the setter LP employee IDs for use in secondary queries
+        $responseData['_setterLPEmployeeIds'] = $setterLPEmployeeIds;
     }
 
     // Fetch secondary data for performance metrics if secondaryDateRange is provided
@@ -877,38 +947,35 @@ $holidays = [
     $responseData['secondaryIPPHours'] = [];
     $responseData['secondarySettersScorecards'] = [];
     $responseData['secondaryConfirmersScorecards'] = [];
+    $responseData['secondarySettersAppointments'] = [];
     
     if(array_key_exists('secondaryDateRange', $_GET)){
-        // Fetch secondary setters calls
-        $secondarySettersCallsQuery = "SELECT emp_user_12, LastName, cls_Calls.id as id, FirstName, CallDate, ResultCode, cty_id, Connected, Pitched, Positive, qualified, lds_Leads.ApptSet, lds_Leads.Issued FROM cls_Calls LEFT JOIN clr_CallResults ON ResultCode = clr_CallResults.id LEFT JOIN emp_Employees ON emp_id = emp_Employees.id LEFT JOIN lds_Leads ON cls_Calls.lds_id = lds_Leads.id LEFT JOIN srs_SourceSubs ON lds_Leads.srs_id = srs_SourceSubs.id WHERE CallDate BETWEEN '$secondaryStart' AND '$secondaryEnd' AND ResultCode NOT LIKE '%ND%' AND Dialer = 'True' AND emp_user_12 > 0 AND cty_id NOT IN ('C', 'IPP')";
-        $secondarySettersCalls = curlCall("$endpoint/lp/customReport.php?rptSQL=" . urlencode($secondarySettersCallsQuery));
-
-        // Fetch secondary confirmers calls
-        $secondaryConfirmersCallsQuery = "SELECT emp_user_12, LastName, cls_Calls.id as id, FirstName, CallDate, ResultCode, cty_id, Connected, Pitched, Positive, qualified, lds_Leads.ApptSet, lds_Leads.Issued FROM cls_Calls LEFT JOIN clr_CallResults ON ResultCode = clr_CallResults.id LEFT JOIN emp_Employees ON emp_id = emp_Employees.id LEFT JOIN lds_Leads ON cls_Calls.lds_id = lds_Leads.id LEFT JOIN srs_SourceSubs ON lds_Leads.srs_id = srs_SourceSubs.id WHERE CallDate BETWEEN '$secondaryStart' AND '$secondaryEnd' AND ResultCode NOT LIKE '%ND%' AND Dialer = 'True' AND emp_user_12 > 0 AND cty_id = 'C'";
-        $secondaryConfirmersCalls = curlCall("$endpoint/lp/customReport.php?rptSQL=" . urlencode($secondaryConfirmersCallsQuery));
-
-        // Fetch secondary IPP calls
-        $secondaryIPPCallsQuery = "SELECT emp_user_12, LastName, cls_Calls.id as id, FirstName, CallDate, ResultCode, cty_id, Connected, Pitched, Positive, qualified, lds_Leads.ApptSet, lds_Leads.Issued FROM cls_Calls LEFT JOIN clr_CallResults ON ResultCode = clr_CallResults.id LEFT JOIN emp_Employees ON emp_id = emp_Employees.id LEFT JOIN lds_Leads ON cls_Calls.lds_id = lds_Leads.id LEFT JOIN srs_SourceSubs ON lds_Leads.srs_id = srs_SourceSubs.id WHERE CallDate BETWEEN '$secondaryStart' AND '$secondaryEnd' AND ResultCode NOT LIKE '%ND%' AND Dialer = 'True' AND emp_user_12 > 0 AND cty_id = 'IPP'";
-        $secondaryIPPCalls = curlCall("$endpoint/lp/customReport.php?rptSQL=" . urlencode($secondaryIPPCallsQuery));
-
-        // Get deputy IDs for secondary data
+        // STEP 1: Get unique deputy IDs for secondary date range
+        $secondaryDeputyMappingQuery = "SELECT DISTINCT emp_user_12, emp_id, FirstName, LastName FROM cls_Calls LEFT JOIN emp_Employees ON emp_id = emp_Employees.id WHERE CallDate BETWEEN '$secondaryStart' AND '$secondaryEnd' AND ResultCode NOT LIKE '%ND%' AND Dialer = 'True' AND emp_user_12 > 0";
+        $secondaryDeputyMappingResults = curlCall("$endpoint/lp/customReport.php?rptSQL=" . urlencode($secondaryDeputyMappingQuery));
+        
+        // Build mapping and collect deputy IDs
+        $secondaryDeputyToLPMapping = [];
+        $secondaryDeputyToNameMapping = [];
         $secondaryDeputyIDs = [];
-        foreach($secondarySettersCalls as $call){
-            if(!in_array($call['emp_user_12'], $secondaryDeputyIDs)){
-                $secondaryDeputyIDs[] = $call['emp_user_12'];
-            }
-        }
-        foreach($secondaryConfirmersCalls as $call){
-            if(!in_array($call['emp_user_12'], $secondaryDeputyIDs)){
-                $secondaryDeputyIDs[] = $call['emp_user_12'];
+        foreach($secondaryDeputyMappingResults as $row){
+            if(isset($row['emp_user_12']) && isset($row['emp_id'])){
+                $deputyID = intval($row['emp_user_12']);
+                $secondaryDeputyToLPMapping[$deputyID] = intval($row['emp_id']);
+                $secondaryDeputyToNameMapping[$deputyID] = trim($row['FirstName'] . ' ' . $row['LastName']);
+                if(!in_array($deputyID, $secondaryDeputyIDs)){
+                    $secondaryDeputyIDs[] = $deputyID;
+                }
             }
         }
 
-        // Fetch timesheets for secondary date range
+        // STEP 2: Fetch timesheets for secondary date range
         $secondaryTimesheetEmployees = [];
         $secondarySettersTimesheetEmployees = []; // Hours for employees clocked into Setter operational unit
         $secondaryConfirmersTimesheetEmployees = []; // Hours for employees clocked into Confirmer operational unit
         $secondaryIPPTimesheetEmployees = []; // Hours for employees clocked into IPP Dialing - Office operational unit
+        $secondaryDeputyIDOperationalUnits = []; // Track operational units per deputy ID
+        
         foreach($secondaryDeputyIDs as $deputyID){
             $theseTimesheets = curlCall("$endpoint/deputy/getTimesheets.php?startDate=$secondaryStart&endDate=$secondaryEnd&id=" . intval($deputyID));
             foreach($theseTimesheets as $timesheet){
@@ -918,6 +985,16 @@ $holidays = [
                     $operationalUnitName = $timesheet['_DPMetaData']['OperationalUnitInfo']['OperationalUnitName'];
                 }
                 
+                // Track operational units for this deputy ID (for classification)
+                if($operationalUnitName){
+                    if(!isset($secondaryDeputyIDOperationalUnits[$deputyID])){
+                        $secondaryDeputyIDOperationalUnits[$deputyID] = [];
+                    }
+                    if(!in_array($operationalUnitName, $secondaryDeputyIDOperationalUnits[$deputyID])){
+                        $secondaryDeputyIDOperationalUnits[$deputyID][] = $operationalUnitName;
+                    }
+                }
+                
                 $isSetterOperationalUnit = $operationalUnitName === 'Setter';
                 $isConfirmerOperationalUnit = $operationalUnitName && (
                     $operationalUnitName === 'Confirmer' || 
@@ -925,8 +1002,10 @@ $holidays = [
                     stripos($operationalUnitName, 'Confirmer') !== false
                 );
                 $isIPPOperationalUnit = $operationalUnitName && (
+                    $operationalUnitName === 'IPP' ||
                     $operationalUnitName === 'IPP Dialing - Office' ||
-                    stripos($operationalUnitName, 'IPP Dialing') !== false
+                    stripos($operationalUnitName, 'IPP Dialing') !== false ||
+                    stripos($operationalUnitName, 'IPP') !== false
                 );
                 
                 if($timesheet['IsInProgress']){
@@ -976,8 +1055,73 @@ $holidays = [
                 }
             }
         }
+        
+        // STEP 3: Classify secondary deputy IDs based on operational unit
+        $secondarySettersDeputyIDs = [];
+        $secondaryConfirmersDeputyIDs = [];
+        $secondaryIPPDeputyIDs = [];
+        foreach($secondaryDeputyIDs as $deputyID){
+            $hasSetterUnit = false;
+            $hasConfirmerUnit = false;
+            $hasIPPUnit = false;
+            
+            if(isset($secondaryDeputyIDOperationalUnits[$deputyID])){
+                foreach($secondaryDeputyIDOperationalUnits[$deputyID] as $unitName){
+                    if($unitName === 'Setter'){
+                        $hasSetterUnit = true;
+                    }
+                    if($unitName === 'Confirmer' || $unitName === 'Confirmer - Office' || stripos($unitName, 'Confirmer') !== false){
+                        $hasConfirmerUnit = true;
+                    }
+                    if($unitName === 'IPP' || $unitName === 'IPP Dialing - Office' || stripos($unitName, 'IPP Dialing') !== false || stripos($unitName, 'IPP') !== false){
+                        $hasIPPUnit = true;
+                    }
+                }
+            }
+            // Classify based on operational unit
+            if($hasSetterUnit){
+                $secondarySettersDeputyIDs[] = $deputyID;
+            } 
+            if($hasConfirmerUnit){
+                $secondaryConfirmersDeputyIDs[] = $deputyID;
+            }
+            if($hasIPPUnit){
+                $secondaryIPPDeputyIDs[] = $deputyID;
+            }
+        }
+        
+        // Make arrays unique
+        $secondarySettersDeputyIDs = array_unique($secondarySettersDeputyIDs);
+        $secondaryConfirmersDeputyIDs = array_unique($secondaryConfirmersDeputyIDs);
+        $secondaryIPPDeputyIDs = array_unique($secondaryIPPDeputyIDs);
+        
+        // STEP 4: Fetch secondary calls filtered by classified deputy IDs (at SQL level)
+        $secondarySettersCalls = [];
+        $secondaryConfirmersCalls = [];
+        $secondaryIPPCalls = [];
+        
+        // Fetch secondary setters calls - only for employees clocked into Setter operational unit
+        if(!empty($secondarySettersDeputyIDs)){
+            $secondarySettersDeputyIdsList = implode(',', $secondarySettersDeputyIDs);
+            $secondarySettersCallsQuery = "SELECT emp_user_12, emp_id, LastName, cls_Calls.id as id, FirstName, CallDate, ResultCode, cty_id, Connected, Pitched, Positive, qualified, lds_Leads.ApptSet, lds_Leads.Issued FROM cls_Calls LEFT JOIN clr_CallResults ON ResultCode = clr_CallResults.id LEFT JOIN emp_Employees ON emp_id = emp_Employees.id LEFT JOIN lds_Leads ON cls_Calls.lds_id = lds_Leads.id LEFT JOIN srs_SourceSubs ON lds_Leads.srs_id = srs_SourceSubs.id WHERE CallDate BETWEEN '$secondaryStart' AND '$secondaryEnd' AND ResultCode NOT LIKE '%ND%' AND Dialer = 'True' AND emp_user_12 IN ($secondarySettersDeputyIdsList) AND cty_id NOT IN ('C', 'IPP')";
+            $secondarySettersCalls = curlCall("$endpoint/lp/customReport.php?rptSQL=" . urlencode($secondarySettersCallsQuery));
+        }
+        
+        // Fetch secondary confirmers calls - only for employees clocked into Confirmer operational unit
+        if(!empty($secondaryConfirmersDeputyIDs)){
+            $secondaryConfirmersDeputyIdsList = implode(',', $secondaryConfirmersDeputyIDs);
+            $secondaryConfirmersCallsQuery = "SELECT emp_user_12, emp_id, LastName, cls_Calls.id as id, FirstName, CallDate, ResultCode, cty_id, Connected, Pitched, Positive, qualified, lds_Leads.ApptSet, lds_Leads.Issued FROM cls_Calls LEFT JOIN clr_CallResults ON ResultCode = clr_CallResults.id LEFT JOIN emp_Employees ON emp_id = emp_Employees.id LEFT JOIN lds_Leads ON cls_Calls.lds_id = lds_Leads.id LEFT JOIN srs_SourceSubs ON lds_Leads.srs_id = srs_SourceSubs.id WHERE CallDate BETWEEN '$secondaryStart' AND '$secondaryEnd' AND ResultCode NOT LIKE '%ND%' AND Dialer = 'True' AND emp_user_12 IN ($secondaryConfirmersDeputyIdsList) AND cty_id = 'C'";
+            $secondaryConfirmersCalls = curlCall("$endpoint/lp/customReport.php?rptSQL=" . urlencode($secondaryConfirmersCallsQuery));
+        }
+        
+        // Fetch secondary IPP calls - only for employees clocked into IPP operational unit
+        if(!empty($secondaryIPPDeputyIDs)){
+            $secondaryIPPDeputyIdsList = implode(',', $secondaryIPPDeputyIDs);
+            $secondaryIPPCallsQuery = "SELECT emp_user_12, emp_id, LastName, cls_Calls.id as id, FirstName, CallDate, ResultCode, cty_id, Connected, Pitched, Positive, qualified, lds_Leads.ApptSet, lds_Leads.Issued FROM cls_Calls LEFT JOIN clr_CallResults ON ResultCode = clr_CallResults.id LEFT JOIN emp_Employees ON emp_id = emp_Employees.id LEFT JOIN lds_Leads ON cls_Calls.lds_id = lds_Leads.id LEFT JOIN srs_SourceSubs ON lds_Leads.srs_id = srs_SourceSubs.id WHERE CallDate BETWEEN '$secondaryStart' AND '$secondaryEnd' AND ResultCode NOT LIKE '%ND%' AND Dialer = 'True' AND emp_user_12 IN ($secondaryIPPDeputyIdsList) AND cty_id = 'IPP'";
+            $secondaryIPPCalls = curlCall("$endpoint/lp/customReport.php?rptSQL=" . urlencode($secondaryIPPCallsQuery));
+        }
 
-        // Process secondary setters calls
+        // STEP 5: Process secondary setters calls (already filtered by operational unit at SQL level)
         foreach($secondarySettersCalls as $call){
             if(!array_key_exists(intval($call['emp_user_12']), $secondaryTimesheetEmployees)){
                 continue;
@@ -1083,11 +1227,20 @@ $holidays = [
                 if(isset($secondaryTimesheetEmployees[$empID]['employee'])){
                     $secondaryIPPTimesheetEmployees[$empID]['employee'] = $secondaryTimesheetEmployees[$empID]['employee'];
                 } else {
-                    // Try to get name from secondary setters calls
-                    foreach($secondarySettersCalls as $call){
+                    // Try to get name from secondary IPP calls first (most relevant)
+                    foreach($secondaryIPPCalls as $call){
                         if(intval($call['emp_user_12']) == $empID){
                             $secondaryIPPTimesheetEmployees[$empID]['employee'] = $call['FirstName'] . " " . $call['LastName'];
                             break;
+                        }
+                    }
+                    // If still not found, try secondary setters calls
+                    if(!isset($secondaryIPPTimesheetEmployees[$empID]['employee'])){
+                        foreach($secondarySettersCalls as $call){
+                            if(intval($call['emp_user_12']) == $empID){
+                                $secondaryIPPTimesheetEmployees[$empID]['employee'] = $call['FirstName'] . " " . $call['LastName'];
+                                break;
+                            }
                         }
                     }
                     // If still not found, try secondary confirmers calls
@@ -1098,6 +1251,10 @@ $holidays = [
                                 break;
                             }
                         }
+                    }
+                    // If still not found, try to get from secondary deputy mapping
+                    if(!isset($secondaryIPPTimesheetEmployees[$empID]['employee']) && isset($secondaryDeputyToNameMapping[$empID])){
+                        $secondaryIPPTimesheetEmployees[$empID]['employee'] = $secondaryDeputyToNameMapping[$empID];
                     }
                 }
             }
@@ -1207,6 +1364,64 @@ $holidays = [
             $scorecardData['score'] = $score;
             
             $responseData['secondaryConfirmersScorecards'][] = $scorecardData;
+        }
+
+        // Get LP employee IDs for employees clocked into Setter operational unit (secondary date range)
+        // First build mapping from secondary calls
+        $secondaryDeputyToLPMapping = [];
+        foreach($secondarySettersCalls as $call){
+            if(isset($call['emp_user_12']) && isset($call['emp_id'])){
+                $secondaryDeputyToLPMapping[intval($call['emp_user_12'])] = intval($call['emp_id']);
+            }
+        }
+        foreach($secondaryConfirmersCalls as $call){
+            if(isset($call['emp_user_12']) && isset($call['emp_id'])){
+                $secondaryDeputyToLPMapping[intval($call['emp_user_12'])] = intval($call['emp_id']);
+            }
+        }
+        foreach($secondaryIPPCalls as $call){
+            if(isset($call['emp_user_12']) && isset($call['emp_id'])){
+                $secondaryDeputyToLPMapping[intval($call['emp_user_12'])] = intval($call['emp_id']);
+            }
+        }
+        
+        // Get LP employee IDs for setter employees from secondary timesheets
+        $secondarySetterLPEmployeeIds = [];
+        foreach(array_keys($secondarySettersTimesheetEmployees) as $deputyID){
+            if(isset($secondaryDeputyToLPMapping[$deputyID])){
+                $secondarySetterLPEmployeeIds[] = $secondaryDeputyToLPMapping[$deputyID];
+            }
+        }
+        $secondarySetterLPEmployeeIds = array_unique($secondarySetterLPEmployeeIds);
+        
+        // Fetch secondary appointments for setters (for gross issue calculation)
+        // Only include appointments where SetBy is an employee clocked into Setter operational unit
+        $secondarySettersAppointments = [];
+        if(!empty($secondarySetterLPEmployeeIds)){
+            $secondarySetterLPEmployeeIdsList = implode(',', $secondarySetterLPEmployeeIds);
+            $secondarySettersAppointmentsQuery = "SELECT app_Appointments.id, app_Appointments.lds_id, app_Appointments.cst_id, app_Appointments.ApptDate, app_Appointments.Dsp_ID, app_Appointments.SetBy, app_Appointments.ApptSet, app_Appointments.Issued, app_Appointments.NetIssued, emp_Employees.FirstName, emp_Employees.LastName FROM app_Appointments LEFT JOIN emp_Employees ON app_Appointments.SetBy = emp_Employees.id WHERE app_Appointments.ApptDate BETWEEN '$secondaryStart' AND '$secondaryEnd' AND emp_Employees.Dialer = '1' AND Dsp_ID NOT IN ('Set') AND ApptSet = '1' ORDER BY app_Appointments.id DESC";
+            $secondarySettersAppointments = curlCall("$endpoint/lp/customReport.php?rptSQL=" . urlencode($secondarySettersAppointmentsQuery));
+        }
+        
+        // Format secondary appointments data
+        $responseData['secondarySettersAppointments'] = [];
+        foreach($secondarySettersAppointments as $appointment){
+            $employeeName = null;
+            if(isset($appointment['FirstName']) && isset($appointment['LastName'])){
+                $employeeName = trim($appointment['FirstName']) . " " . trim($appointment['LastName']);
+            }
+            
+            $responseData['secondarySettersAppointments'][] = [
+                'id' => $appointment['id'] ?? null,
+                'lds_id' => $appointment['lds_id'] ?? null,
+                'cst_id' => $appointment['cst_id'] ?? null,
+                'dsp_id' => $appointment['Dsp_ID'] ?? null,
+                'employee' => $employeeName,
+                'date' => $appointment['ApptDate'] ?? null,
+                'ApptSet' => $appointment['ApptSet'] ?? null,
+                'Issued' => $appointment['Issued'] ?? null,
+                'NetIssued' => $appointment['NetIssued'] ?? null,
+            ];
         }
     }
     
