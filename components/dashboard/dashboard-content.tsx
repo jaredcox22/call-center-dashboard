@@ -291,7 +291,7 @@ const buildApiUrl = (
   secondaryDateRange?: string,
   secondaryCustomRange?: { from: Date | undefined; to?: Date | undefined }
 ) => {
-  const baseUrl = 'https://api.integrityprodserver.com/dashboards/ccHorsepowerTest.php'
+  const baseUrl = 'https://api.integrityprodserver.com/dashboards/ccHorsepower.php'
   const params = new URLSearchParams({ dateRange })
   
   if (dateRange === 'Custom Dates' && customRange?.from && customRange?.to) {
