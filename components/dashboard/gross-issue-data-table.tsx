@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useMemo, useEffect, useCallback } from "react"
+import { useState, useMemo, useEffect, useCallback, useRef } from "react"
 import {
   Dialog,
   DialogContent,
@@ -109,6 +109,7 @@ interface GrossIssueDataTableProps {
   timePeriod?: string
   dateRange?: DateRange
   timeRange?: TimeRange
+  selectedEmployees?: string[] // Sync with main dashboard employee filter
 }
 
 type SortField = "employee" | "date" | "ApptSet" | "Issued" | "NetIssued" | "lds_id" | "cst_id" | "dsp_id"
@@ -123,6 +124,7 @@ export function GrossIssueDataTable({
   timePeriod,
   dateRange,
   timeRange,
+  selectedEmployees: propSelectedEmployees = [],
 }: GrossIssueDataTableProps) {
   const [searchQuery, setSearchQuery] = useState("")
   const [sortField, setSortField] = useState<SortField>("date")
@@ -130,7 +132,7 @@ export function GrossIssueDataTable({
   const [isInfoOpen, setIsInfoOpen] = useState(false)
   const [currentPage, setCurrentPage] = useState(1)
   const [selectedRows, setSelectedRows] = useState<Set<string>>(new Set())
-  const [selectedEmployees, setSelectedEmployees] = useState<string[]>([])
+  const [selectedEmployees, setSelectedEmployees] = useState<string[]>(propSelectedEmployees)
   const [employeeSelectOpen, setEmployeeSelectOpen] = useState(false)
   const itemsPerPage = 50 // Render only 50 rows at a time to prevent blocking
 
@@ -144,6 +146,23 @@ export function GrossIssueDataTable({
     })
     return Array.from(employees).sort((a, b) => a.localeCompare(b))
   }, [data])
+
+  // Track previous open state to detect when dialog transitions from closed to open
+  const prevOpenRef = useRef(open)
+  
+  // Sync local selectedEmployees with prop from main dashboard only when dialog opens
+  useEffect(() => {
+    // Only sync when dialog transitions from closed to open
+    if (open && !prevOpenRef.current) {
+      // Filter to only include employees that exist in the current data
+      const validEmployees = propSelectedEmployees.filter(emp => 
+        uniqueEmployees.includes(emp)
+      )
+      // Sync with prop when dialog opens, but allow local changes after that
+      setSelectedEmployees(validEmployees)
+    }
+    prevOpenRef.current = open
+  }, [open, propSelectedEmployees, uniqueEmployees])
 
   // Format the time filter display
   const timeFilterDisplay = useMemo(() => {
@@ -266,11 +285,11 @@ export function GrossIssueDataTable({
     setCurrentPage(1)
   }, [searchQuery, sortField, sortDirection, selectedEmployees])
 
-  // Clear selection and employee filter when dialog closes
+  // Clear selection when dialog closes (but keep employee filter synced with main dashboard)
   const handleOpenChange = useCallback((newOpen: boolean) => {
     if (!newOpen) {
       setSelectedRows(new Set())
-      setSelectedEmployees([])
+      // Don't clear selectedEmployees - keep it synced with main dashboard
     }
     onOpenChange(newOpen)
   }, [onOpenChange])

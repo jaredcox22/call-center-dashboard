@@ -895,9 +895,9 @@ $holidays = [
             $responseData['confirmersScorecards'][] = $scorecardData;
         }
 
-        // Get LP employee IDs for employees clocked into Setter operational unit
+        // Get LP employee IDs for employees in settersDeputyIDs array
         $setterLPEmployeeIds = [];
-        foreach(array_keys($settersTimesheetEmployees) as $deputyID){
+        foreach($settersDeputyIDs as $deputyID){
             if(isset($deputyToLPMapping[$deputyID])){
                 $setterLPEmployeeIds[] = $deputyToLPMapping[$deputyID];
             }
@@ -905,11 +905,11 @@ $holidays = [
         $setterLPEmployeeIds = array_unique($setterLPEmployeeIds);
         
         // Fetch appointments for setters (for gross issue calculation)
-        // Only include appointments where SetBy is an employee clocked into Setter operational unit
+        // Only include appointments where SetBy is an employee in settersDeputyIDs array
         $settersAppointments = [];
         if(!empty($setterLPEmployeeIds)){
             $setterLPEmployeeIdsList = implode(',', $setterLPEmployeeIds);
-            $settersAppointmentsQuery = "SELECT app_Appointments.id, app_Appointments.lds_id, app_Appointments.cst_id, app_Appointments.ApptDate, app_Appointments.Dsp_ID, app_Appointments.SetBy, app_Appointments.ApptSet, app_Appointments.Issued, app_Appointments.NetIssued, emp_Employees.FirstName, emp_Employees.LastName FROM app_Appointments LEFT JOIN emp_Employees ON app_Appointments.SetBy = emp_Employees.id WHERE app_Appointments.ApptDate BETWEEN '$start' AND '$end' AND emp_Employees.Dialer = '1' AND Dsp_ID NOT IN ('Set') AND ApptSet = '1' ORDER BY app_Appointments.id DESC";
+            $settersAppointmentsQuery = "SELECT app_Appointments.id, app_Appointments.lds_id, app_Appointments.cst_id, app_Appointments.ApptDate, app_Appointments.Dsp_ID, app_Appointments.SetBy, app_Appointments.ApptSet, app_Appointments.Issued, app_Appointments.NetIssued, emp_Employees.FirstName, emp_Employees.LastName FROM app_Appointments LEFT JOIN emp_Employees ON app_Appointments.SetBy = emp_Employees.id WHERE app_Appointments.ApptDate BETWEEN '$start' AND '$end' AND emp_Employees.Dialer = '1' AND Dsp_ID NOT IN ('Set') AND ApptSet = '1' AND app_Appointments.SetBy IN ($setterLPEmployeeIdsList) ORDER BY app_Appointments.id DESC";
             $settersAppointments = curlCall("$endpoint/lp/customReport.php?rptSQL=" . urlencode($settersAppointmentsQuery));
         }
         
@@ -1366,7 +1366,7 @@ $holidays = [
             $responseData['secondaryConfirmersScorecards'][] = $scorecardData;
         }
 
-        // Get LP employee IDs for employees clocked into Setter operational unit (secondary date range)
+        // Get LP employee IDs for employees in secondarySettersDeputyIDs array
         // First build mapping from secondary calls
         $secondaryDeputyToLPMapping = [];
         foreach($secondarySettersCalls as $call){
@@ -1385,9 +1385,9 @@ $holidays = [
             }
         }
         
-        // Get LP employee IDs for setter employees from secondary timesheets
+        // Get LP employee IDs for employees in secondarySettersDeputyIDs array
         $secondarySetterLPEmployeeIds = [];
-        foreach(array_keys($secondarySettersTimesheetEmployees) as $deputyID){
+        foreach($secondarySettersDeputyIDs as $deputyID){
             if(isset($secondaryDeputyToLPMapping[$deputyID])){
                 $secondarySetterLPEmployeeIds[] = $secondaryDeputyToLPMapping[$deputyID];
             }
@@ -1395,11 +1395,11 @@ $holidays = [
         $secondarySetterLPEmployeeIds = array_unique($secondarySetterLPEmployeeIds);
         
         // Fetch secondary appointments for setters (for gross issue calculation)
-        // Only include appointments where SetBy is an employee clocked into Setter operational unit
+        // Only include appointments where SetBy is an employee in secondarySettersDeputyIDs array
         $secondarySettersAppointments = [];
         if(!empty($secondarySetterLPEmployeeIds)){
             $secondarySetterLPEmployeeIdsList = implode(',', $secondarySetterLPEmployeeIds);
-            $secondarySettersAppointmentsQuery = "SELECT app_Appointments.id, app_Appointments.lds_id, app_Appointments.cst_id, app_Appointments.ApptDate, app_Appointments.Dsp_ID, app_Appointments.SetBy, app_Appointments.ApptSet, app_Appointments.Issued, app_Appointments.NetIssued, emp_Employees.FirstName, emp_Employees.LastName FROM app_Appointments LEFT JOIN emp_Employees ON app_Appointments.SetBy = emp_Employees.id WHERE app_Appointments.ApptDate BETWEEN '$secondaryStart' AND '$secondaryEnd' AND emp_Employees.Dialer = '1' AND Dsp_ID NOT IN ('Set') AND ApptSet = '1' ORDER BY app_Appointments.id DESC";
+            $secondarySettersAppointmentsQuery = "SELECT app_Appointments.id, app_Appointments.lds_id, app_Appointments.cst_id, app_Appointments.ApptDate, app_Appointments.Dsp_ID, app_Appointments.SetBy, app_Appointments.ApptSet, app_Appointments.Issued, app_Appointments.NetIssued, emp_Employees.FirstName, emp_Employees.LastName FROM app_Appointments LEFT JOIN emp_Employees ON app_Appointments.SetBy = emp_Employees.id WHERE app_Appointments.ApptDate BETWEEN '$secondaryStart' AND '$secondaryEnd' AND emp_Employees.Dialer = '1' AND Dsp_ID NOT IN ('Set') AND ApptSet = '1' AND app_Appointments.SetBy IN ($secondarySetterLPEmployeeIdsList) ORDER BY app_Appointments.id DESC";
             $secondarySettersAppointments = curlCall("$endpoint/lp/customReport.php?rptSQL=" . urlencode($secondarySettersAppointmentsQuery));
         }
         

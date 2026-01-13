@@ -291,7 +291,7 @@ const buildApiUrl = (
   secondaryDateRange?: string,
   secondaryCustomRange?: { from: Date | undefined; to?: Date | undefined }
 ) => {
-  const baseUrl = 'https://api.integrityprodserver.com/dashboards/ccHorsepower.php'
+  const baseUrl = 'https://api.integrityprodserver.com/dashboards/ccHorsepowerTest.php'
   const params = new URLSearchParams({ dateRange })
   
   if (dateRange === 'Custom Dates' && customRange?.from && customRange?.to) {
@@ -1067,20 +1067,15 @@ export function DashboardContent() {
   })() : []
 
   // Filter appointments for gross issue data table using secondary date range
-  const filteredSecondaryGrossIssueAppointments = rawData ? (() => {
+  // Unfiltered appointments for GrossIssueDataTable (so it can show all employees in filter)
+  const allSecondaryGrossIssueAppointments = rawData ? (() => {
     if (dashboardType !== 'setters') return []
     
     const appointmentsKey = 'secondarySettersAppointments'
     const allAppointments = rawData[appointmentsKey] || []
-
-    // Filter appointments by selected employees
-    let filteredAppointments = allAppointments
-    if (selectedEmployees.length > 0) {
-      filteredAppointments = allAppointments.filter((apt: any) => selectedEmployees.includes(apt.employee))
-    }
     
-    // Transform to GrossIssueDataTable format
-    return filteredAppointments.map((apt: any) => ({
+    // Transform to GrossIssueDataTable format (unfiltered - let the component handle filtering)
+    return allAppointments.map((apt: any) => ({
       employee: apt.employee || '',
       date: apt.date || null,
       ApptSet: apt.ApptSet ?? null,
@@ -1092,6 +1087,11 @@ export function DashboardContent() {
       dsp_id: apt.dsp_id ?? null,
     }))
   })() : []
+
+  // Filtered appointments for other uses (if needed)
+  const filteredSecondaryGrossIssueAppointments = selectedEmployees.length > 0
+    ? allSecondaryGrossIssueAppointments.filter((apt: any) => selectedEmployees.includes(apt.employee))
+    : allSecondaryGrossIssueAppointments
 
   // Transform all calls for connection and dials per hour data tables
   const connectionTableData = filteredAllCalls.map((call: any) => ({
@@ -2310,7 +2310,7 @@ export function DashboardContent() {
             onExcludeRecords={(ids) => excludeRecords("conversionUnqualified", ids)}
           />
           <GrossIssueDataTable
-            data={filteredSecondaryGrossIssueAppointments}
+            data={allSecondaryGrossIssueAppointments}
             open={grossIssueTableOpen}
             onOpenChange={setGrossIssueTableOpen}
             excludedIds={getExcludedIdsForTable("grossIssue")}
@@ -2318,6 +2318,7 @@ export function DashboardContent() {
             timePeriod={secondaryTimePeriod}
             dateRange={secondaryConfirmedDateRange}
             timeRange={secondaryConfirmedTimeRange}
+            selectedEmployees={selectedEmployees}
           />
         </>
       )}
