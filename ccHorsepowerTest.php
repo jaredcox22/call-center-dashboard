@@ -260,8 +260,10 @@ $holidays = [
                     stripos($operationalUnitName, 'Confirmer') !== false
                 );
                 $isIPPOperationalUnit = $operationalUnitName && (
+                    $operationalUnitName === 'IPP' ||
                     $operationalUnitName === 'IPP Dialing - Office' ||
-                    stripos($operationalUnitName, 'IPP Dialing') !== false
+                    stripos($operationalUnitName, 'IPP Dialing') !== false ||
+                    stripos($operationalUnitName, 'IPP') !== false
                 );
                 
                 if($timesheet['IsInProgress']){
@@ -340,7 +342,7 @@ $holidays = [
                     if($unitName === 'Confirmer' || $unitName === 'Confirmer - Office' || stripos($unitName, 'Confirmer') !== false){
                         $hasConfirmerUnit = true;
                     }
-                    if($unitName === 'IPP Dialing - Office' || stripos($unitName, 'IPP Dialing') !== false){
+                    if($unitName === 'IPP' || $unitName === 'IPP Dialing - Office' || stripos($unitName, 'IPP Dialing') !== false || stripos($unitName, 'IPP') !== false){
                         $hasIPPUnit = true;
                     }
                 }
@@ -568,11 +570,20 @@ $holidays = [
                 if(isset($timesheetEmployees[$empID]['employee'])){
                     $ippTimesheetEmployees[$empID]['employee'] = $timesheetEmployees[$empID]['employee'];
                 } else {
-                    // Try to get name from setters calls
-                    foreach($settersCalls as $call){
+                    // Try to get name from IPP calls first (most relevant)
+                    foreach($ippCalls as $call){
                         if(intval($call['emp_user_12']) == $empID){
                             $ippTimesheetEmployees[$empID]['employee'] = $call['FirstName'] . " " . $call['LastName'];
                             break;
+                        }
+                    }
+                    // If still not found, try setters calls
+                    if(!isset($ippTimesheetEmployees[$empID]['employee'])){
+                        foreach($settersCalls as $call){
+                            if(intval($call['emp_user_12']) == $empID){
+                                $ippTimesheetEmployees[$empID]['employee'] = $call['FirstName'] . " " . $call['LastName'];
+                                break;
+                            }
                         }
                     }
                     // If still not found, try confirmers calls
@@ -583,6 +594,10 @@ $holidays = [
                                 break;
                             }
                         }
+                    }
+                    // If still not found, try to get from deputy mapping
+                    if(!isset($ippTimesheetEmployees[$empID]['employee']) && isset($deputyToNameMapping[$empID])){
+                        $ippTimesheetEmployees[$empID]['employee'] = $deputyToNameMapping[$empID];
                     }
                 }
             }
@@ -987,8 +1002,10 @@ $holidays = [
                     stripos($operationalUnitName, 'Confirmer') !== false
                 );
                 $isIPPOperationalUnit = $operationalUnitName && (
+                    $operationalUnitName === 'IPP' ||
                     $operationalUnitName === 'IPP Dialing - Office' ||
-                    stripos($operationalUnitName, 'IPP Dialing') !== false
+                    stripos($operationalUnitName, 'IPP Dialing') !== false ||
+                    stripos($operationalUnitName, 'IPP') !== false
                 );
                 
                 if($timesheet['IsInProgress']){
@@ -1056,7 +1073,7 @@ $holidays = [
                     if($unitName === 'Confirmer' || $unitName === 'Confirmer - Office' || stripos($unitName, 'Confirmer') !== false){
                         $hasConfirmerUnit = true;
                     }
-                    if($unitName === 'IPP Dialing - Office' || stripos($unitName, 'IPP Dialing') !== false){
+                    if($unitName === 'IPP' || $unitName === 'IPP Dialing - Office' || stripos($unitName, 'IPP Dialing') !== false || stripos($unitName, 'IPP') !== false){
                         $hasIPPUnit = true;
                     }
                 }
@@ -1210,11 +1227,20 @@ $holidays = [
                 if(isset($secondaryTimesheetEmployees[$empID]['employee'])){
                     $secondaryIPPTimesheetEmployees[$empID]['employee'] = $secondaryTimesheetEmployees[$empID]['employee'];
                 } else {
-                    // Try to get name from secondary setters calls
-                    foreach($secondarySettersCalls as $call){
+                    // Try to get name from secondary IPP calls first (most relevant)
+                    foreach($secondaryIPPCalls as $call){
                         if(intval($call['emp_user_12']) == $empID){
                             $secondaryIPPTimesheetEmployees[$empID]['employee'] = $call['FirstName'] . " " . $call['LastName'];
                             break;
+                        }
+                    }
+                    // If still not found, try secondary setters calls
+                    if(!isset($secondaryIPPTimesheetEmployees[$empID]['employee'])){
+                        foreach($secondarySettersCalls as $call){
+                            if(intval($call['emp_user_12']) == $empID){
+                                $secondaryIPPTimesheetEmployees[$empID]['employee'] = $call['FirstName'] . " " . $call['LastName'];
+                                break;
+                            }
                         }
                     }
                     // If still not found, try secondary confirmers calls
@@ -1225,6 +1251,10 @@ $holidays = [
                                 break;
                             }
                         }
+                    }
+                    // If still not found, try to get from secondary deputy mapping
+                    if(!isset($secondaryIPPTimesheetEmployees[$empID]['employee']) && isset($secondaryDeputyToNameMapping[$empID])){
+                        $secondaryIPPTimesheetEmployees[$empID]['employee'] = $secondaryDeputyToNameMapping[$empID];
                     }
                 }
             }
