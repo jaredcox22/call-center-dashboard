@@ -1104,6 +1104,7 @@ export function DashboardContent() {
   const dialsPerHourTableData = filteredAllCalls.map((call: any) => ({
     employee: call.employee || '',
     date: call.date || null,
+    result: call.result || null,
     id: call.id ?? null,
   }))
 

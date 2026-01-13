@@ -46,6 +46,7 @@ const formatDate = (dateString: string | null | undefined): string => {
 interface DialsPerHourRecord {
   employee: string
   date: string | null
+  result?: string | null
   id?: number | null
 }
 
@@ -58,7 +59,7 @@ interface DialsPerHourDataTableProps {
   onExcludeRecords?: (recordIds: string[]) => void
 }
 
-type SortField = "employee" | "date" | "id"
+type SortField = "employee" | "date" | "result" | "id"
 type SortDirection = "asc" | "desc" | null
 
 export function DialsPerHourDataTable({ 
@@ -108,6 +109,7 @@ export function DialsPerHourDataTable({
       return (
         (record.employee?.toLowerCase() ?? "").includes(query) ||
         (record.id?.toString() ?? "").includes(query) ||
+        (record.result?.toLowerCase() ?? "").includes(query) ||
         formatDate(record.date).toLowerCase().includes(query)
       )
     })
@@ -344,6 +346,17 @@ export function DialsPerHourDataTable({
                       {getSortIcon("date")}
                     </Button>
                   </TableHead>
+                  <TableHead className="min-w-[110px] sm:min-w-[130px]">
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="h-8 -ml-2"
+                      onClick={() => handleSort("result")}
+                    >
+                      Result
+                      {getSortIcon("result")}
+                    </Button>
+                  </TableHead>
                   <TableHead className="w-[100px] hidden sm:table-cell">
                     <Button
                       variant="ghost"
@@ -363,7 +376,7 @@ export function DialsPerHourDataTable({
               <TableBody>
                 {filteredAndSortedData.length === 0 ? (
                   <TableRow>
-                    <TableCell colSpan={onExcludeRecords ? 5 : 3} className="text-center py-8 text-muted-foreground">
+                    <TableCell colSpan={onExcludeRecords ? 6 : 4} className="text-center py-8 text-muted-foreground">
                       {searchQuery ? "No records found matching your search." : "No data available."}
                     </TableCell>
                   </TableRow>
@@ -389,6 +402,9 @@ export function DialsPerHourDataTable({
                         </TableCell>
                         <TableCell className="text-sm text-muted-foreground min-w-[160px]">
                           {formatDate(record.date)}
+                        </TableCell>
+                        <TableCell className="text-sm text-muted-foreground">
+                          {record.result ?? "N/A"}
                         </TableCell>
                         <TableCell className="text-sm text-muted-foreground hidden sm:table-cell">
                           {record.id ?? "N/A"}
