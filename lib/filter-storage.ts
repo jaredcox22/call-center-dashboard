@@ -46,7 +46,7 @@ export const FilterStorage = {
     try {
       localStorage.setItem(FILTER_STORAGE_KEY, JSON.stringify(stored))
     } catch (error) {
-      console.error('Failed to save filters to localStorage:', error)
+      // Failed to save filters
     }
   },
 
@@ -60,7 +60,7 @@ export const FilterStorage = {
       try {
         localStorage.setItem(FILTER_STORAGE_KEY, JSON.stringify(stored))
       } catch (error) {
-        console.error('Failed to update filter activity:', error)
+        // Failed to update filter activity
       }
     }
   },
@@ -97,7 +97,6 @@ export const FilterStorage = {
 
       return JSON.parse(stored) as StoredFilters
     } catch (error) {
-      console.error('Failed to load filters from localStorage:', error)
       return null
     }
   },
@@ -135,7 +134,7 @@ export const FilterStorage = {
     try {
       localStorage.removeItem(FILTER_STORAGE_KEY)
     } catch (error) {
-      console.error('Failed to clear filters from localStorage:', error)
+      // Failed to clear filters
     }
   },
 }

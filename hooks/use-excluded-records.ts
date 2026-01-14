@@ -72,7 +72,6 @@ export function useExcludedRecords() {
         })
       },
       (error) => {
-        console.error("Error fetching excluded records:", error)
         setState((prev) => ({
           ...prev,
           loading: false,

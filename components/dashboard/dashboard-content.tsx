@@ -22,9 +22,9 @@ import { ConversionUnqualifiedDataTable } from "./conversion-unqualified-data-ta
 import { GrossIssueDataTable } from "./gross-issue-data-table"
 import { ExcludedRecordsPanel } from "./excluded-records-panel"
 import { useExcludedRecords } from "@/hooks/use-excluded-records"
-import { LogOut, RefreshCw, Moon, Sun, Menu, CalendarIcon, AlertCircle, Users, ChevronDown, Ban } from "lucide-react"
-import { Badge } from "@/components/ui/badge"
-import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetTrigger } from "@/components/ui/sheet"
+import { RefreshCw, Moon, Sun, CalendarIcon, AlertCircle, ChevronDown, Users } from "lucide-react"
+import { useRouter } from "next/navigation"
+import { UserMenu } from "./user-menu"
 import {
   AlertDialog,
   AlertDialogAction,
@@ -35,7 +35,6 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog"
-import { VisuallyHidden } from "@/components/ui/visually-hidden"
 import { useActivityTracker } from "@/hooks/use-activity-tracker"
 import { SessionWarning } from "@/components/session-warning"
 import { LoadingScreen } from "./loading-screen"
@@ -289,9 +288,10 @@ const buildApiUrl = (
   dateRange: string, 
   customRange?: { from: Date | undefined; to?: Date | undefined },
   secondaryDateRange?: string,
-  secondaryCustomRange?: { from: Date | undefined; to?: Date | undefined }
+  secondaryCustomRange?: { from: Date | undefined; to?: Date | undefined },
+  lpId?: number | null
 ) => {
-  const baseUrl = 'https://api.integrityprodserver.com/dashboards/ccHorsepower.php'
+  const baseUrl = 'https://api.integrityprodserver.com/dashboards/ccHorsepowerTest.php'
   const params = new URLSearchParams({ dateRange })
   
   if (dateRange === 'Custom Dates' && customRange?.from && customRange?.to) {
@@ -313,6 +313,11 @@ const buildApiUrl = (
     const secondaryNextDay = new Date(secondaryCustomRange.to)
     secondaryNextDay.setDate(secondaryNextDay.getDate() + 1)
     params.append('secondaryEndDate', format(secondaryNextDay, 'yyyy-MM-dd'))
+  }
+  
+  // Add LP ID if provided (for agent filtering)
+  if (lpId !== null && lpId !== undefined) {
+    params.append('lpId', lpId.toString())
   }
   
   return `${baseUrl}?${params.toString()}`
@@ -650,14 +655,13 @@ const transformApiData = (
 }
 
 export function DashboardContent() {
-  const { user, logout } = useAuth()
+  const { user, logout, isAdmin, isAgent, lpId } = useAuth()
   const { theme, toggleTheme } = useTheme()
+  const router = useRouter()
   const [timePeriod, setTimePeriod] = useState("Today")
   const [selectedEmployees, setSelectedEmployees] = useState<string[]>([])
   const [employeeSelectOpen, setEmployeeSelectOpen] = useState(false)
   const [dashboardType, setDashboardType] = useState<"setters" | "confirmers" | "ipp">("setters")
-  const [isMenuOpen, setIsMenuOpen] = useState(false)
-  const [showLogoutDialog, setShowLogoutDialog] = useState(false)
   const [customDateRange, setCustomDateRange] = useState<{ from: Date | undefined; to?: Date | undefined }>({ 
     from: undefined, 
     to: undefined 
@@ -724,12 +728,18 @@ export function DashboardContent() {
   useActivityTracker()
 
   // Load filters from localStorage on mount
+  // For agents, clear selectedEmployees to ensure they only see their own data
   const [filtersLoaded, setFiltersLoaded] = useState(false)
   useEffect(() => {
     const stored = FilterStorage.loadFilters()
     if (stored) {
       const deserialized = deserializeFilterState(stored)
-      setSelectedEmployees(deserialized.selectedEmployees)
+      // Only load selectedEmployees for admins
+      if (isAdmin) {
+        setSelectedEmployees(deserialized.selectedEmployees)
+      } else {
+        setSelectedEmployees([])
+      }
       setTimePeriod(deserialized.timePeriod)
       setDashboardType(deserialized.dashboardType)
       setConfirmedDateRange(deserialized.confirmedDateRange)
@@ -737,12 +747,18 @@ export function DashboardContent() {
       setSecondaryTimePeriod(deserialized.secondaryTimePeriod)
       setSecondaryConfirmedDateRange(deserialized.secondaryConfirmedDateRange)
       setSecondaryConfirmedTimeRange(deserialized.secondaryConfirmedTimeRange)
+    } else {
+      // If no stored filters, ensure agents have empty selectedEmployees
+      if (!isAdmin) {
+        setSelectedEmployees([])
+      }
     }
     setFiltersLoaded(true)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []) // Only run once on mount
+  }, [isAdmin]) // Re-run when admin status changes
 
   // Only build API URL if we have complete date range for custom dates
+  // For agents, pass their LP ID to filter data; for admins, don't pass LP ID (get all data)
   const apiUrl = (() => {
     if (timePeriod === 'Custom Dates' && (!confirmedDateRange.from || !confirmedDateRange.to)) {
       return null // Don't fetch until dates are confirmed with Ok button
@@ -750,7 +766,8 @@ export function DashboardContent() {
     if (secondaryTimePeriod === 'Custom Dates' && (!secondaryConfirmedDateRange.from || !secondaryConfirmedDateRange.to)) {
       return null // Don't fetch until secondary dates are confirmed with Ok button
     }
-    return buildApiUrl(timePeriod, confirmedDateRange, secondaryTimePeriod || 'Rolling 30 Days', secondaryConfirmedDateRange)
+    const agentLpId = isAgent ? lpId : null
+    return buildApiUrl(timePeriod, confirmedDateRange, secondaryTimePeriod || 'Rolling 30 Days', secondaryConfirmedDateRange, agentLpId)
   })()
 
   const { data: rawData, error, mutate } = useSWR(apiUrl, fetcher, {
@@ -777,6 +794,7 @@ export function DashboardContent() {
     {
       settersCalls: rawData.secondarySettersCalls || [],
       confirmersCalls: rawData.secondaryConfirmersCalls || [],
+      ippCalls: rawData.secondaryIPPCalls || [],
       settersHours: rawData.secondarySettersHours || [],
       confirmersHours: rawData.secondaryConfirmersHours || [],
       IPPHours: rawData.secondaryIPPHours || [],
@@ -790,6 +808,27 @@ export function DashboardContent() {
     secondaryConfirmedTimeRange,
     excludedIdsForTransform
   ) : null
+  
+  // Auto-select dashboard tab based on available data (only for agents, and only on initial load)
+  const [hasAutoSelectedTab, setHasAutoSelectedTab] = useState(false)
+  useEffect(() => {
+    if (!rawData || hasAutoSelectedTab || isAdmin) return
+    
+    const hasSettersData = (rawData.settersCalls?.length > 0) || (rawData.settersHours?.length > 0)
+    const hasConfirmersData = (rawData.confirmersCalls?.length > 0) || (rawData.confirmersHours?.length > 0)
+    const hasIPPData = (rawData.ippCalls?.length > 0) || (rawData.IPPHours?.length > 0)
+    
+    // Auto-select the first tab that has data
+    if (hasSettersData) {
+      setDashboardType('setters')
+    } else if (hasConfirmersData) {
+      setDashboardType('confirmers')
+    } else if (hasIPPData) {
+      setDashboardType('ipp')
+    }
+    
+    setHasAutoSelectedTab(true)
+  }, [rawData, hasAutoSelectedTab, isAdmin])
 
   // Get unique employees from the appropriate calls array or hours array based on dashboard type
   const availableEmployees = rawData ? (() => {
@@ -928,15 +967,6 @@ export function DashboardContent() {
     return "#3b82f6" // blue (0-29)
   }
 
-  const handleLogoutClick = () => {
-    setShowLogoutDialog(true)
-    setIsMenuOpen(false) // Close mobile menu if open
-  }
-
-  const handleConfirmLogout = () => {
-    setShowLogoutDialog(false)
-    logout()
-  }
 
   // Filter STL data by time range if provided
   const filteredStlData = rawData && rawData.stl ? (() => {
@@ -1196,6 +1226,65 @@ export function DashboardContent() {
       scorecard: 0,
     },
   }
+  
+  // Determine if there's actual data for the current dashboard type
+  const hasDataForCurrentDashboard = rawData ? (() => {
+    if (dashboardType === 'setters') {
+      const calls = rawData.settersCalls || []
+      const hours = rawData.settersHours || []
+      // Filter by selected employees if any
+      if (selectedEmployees.length > 0) {
+        return calls.some((c: any) => selectedEmployees.includes(c.employee)) ||
+               hours.some((h: any) => selectedEmployees.includes(h.employee))
+      }
+      return calls.length > 0 || hours.length > 0
+    } else if (dashboardType === 'confirmers') {
+      const calls = rawData.confirmersCalls || []
+      const hours = rawData.confirmersHours || []
+      if (selectedEmployees.length > 0) {
+        return calls.some((c: any) => selectedEmployees.includes(c.employee)) ||
+               hours.some((h: any) => selectedEmployees.includes(h.employee))
+      }
+      return calls.length > 0 || hours.length > 0
+    } else {
+      const calls = rawData.ippCalls || []
+      const hours = rawData.IPPHours || []
+      if (selectedEmployees.length > 0) {
+        return calls.some((c: any) => selectedEmployees.includes(c.employee)) ||
+               hours.some((h: any) => selectedEmployees.includes(h.employee))
+      }
+      return calls.length > 0 || hours.length > 0
+    }
+  })() : false
+  
+  // Determine if there's actual data for the secondary (Performance Metrics) dashboard
+  const hasDataForSecondaryDashboard = rawData ? (() => {
+    if (dashboardType === 'setters') {
+      const calls = rawData.secondarySettersCalls || []
+      const hours = rawData.secondarySettersHours || []
+      if (selectedEmployees.length > 0) {
+        return calls.some((c: any) => selectedEmployees.includes(c.employee)) ||
+               hours.some((h: any) => selectedEmployees.includes(h.employee))
+      }
+      return calls.length > 0 || hours.length > 0
+    } else if (dashboardType === 'confirmers') {
+      const calls = rawData.secondaryConfirmersCalls || []
+      const hours = rawData.secondaryConfirmersHours || []
+      if (selectedEmployees.length > 0) {
+        return calls.some((c: any) => selectedEmployees.includes(c.employee)) ||
+               hours.some((h: any) => selectedEmployees.includes(h.employee))
+      }
+      return calls.length > 0 || hours.length > 0
+    } else {
+      const calls = rawData.secondaryIPPCalls || []
+      const hours = rawData.secondaryIPPHours || []
+      if (selectedEmployees.length > 0) {
+        return calls.some((c: any) => selectedEmployees.includes(c.employee)) ||
+               hours.some((h: any) => selectedEmployees.includes(h.employee))
+      }
+      return calls.length > 0 || hours.length > 0
+    }
+  })() : false
 
   return (
     <div className="min-h-screen bg-background">
@@ -1203,89 +1292,44 @@ export function DashboardContent() {
       <SessionWarning />
       
       {/* Header */}
-      <header className="border-b border-border bg-card">
-        <div className="container mx-auto flex items-center justify-between px-4 py-4">
-          <h1 className="text-lg font-bold md:text-2xl">Call Center Dashboard</h1>
-          <div className="flex items-center gap-2 md:gap-4">
-            {/* Desktop: Show email */}
-            <span className="hidden text-sm text-muted-foreground md:inline-block">{user?.email}</span>
+      <header className="sticky top-0 z-50 border-b border-border bg-card/95 backdrop-blur supports-backdrop-filter:bg-card/80">
+        <div className="container mx-auto flex items-center justify-between px-4 py-3 md:px-6">
+          <h1 className="text-lg font-bold tracking-tight md:text-2xl">Call Center Dashboard</h1>
+          <div className="flex items-center gap-2 md:gap-3">
+            {/* Utility Actions - Always Visible */}
+            <div className="flex items-center gap-0.5">
+              <Button 
+                variant="ghost" 
+                size="icon" 
+                onClick={toggleTheme} 
+                title={theme === "dark" ? "Switch to Light Mode" : "Switch to Dark Mode"}
+                className="h-9 w-9"
+              >
+                {theme === "dark" ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
+              </Button>
+              <Button 
+                variant="ghost" 
+                size="icon" 
+                onClick={() => mutate()} 
+                title="Refresh"
+                className="h-9 w-9"
+              >
+                <RefreshCw className="h-4 w-4" />
+              </Button>
+            </div>
             
-            {/* Always visible: Theme & Refresh */}
-            <Button variant="ghost" size="icon" onClick={toggleTheme}>
-              {theme === "dark" ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
-            </Button>
-            <Button variant="ghost" size="icon" onClick={() => mutate()}>
-              <RefreshCw className="h-4 w-4" />
-            </Button>
-            <Button 
-              variant="ghost" 
-              size="icon" 
-              onClick={() => setExcludedRecordsPanelOpen(true)}
-              className="relative"
-            >
-              <Ban className="h-4 w-4" />
-              {relevantExcludedCount > 0 && (
-                <Badge 
-                  variant="destructive" 
-                  className="absolute -top-1.5 -right-1.5 min-w-[18px] h-[18px] px-1 flex items-center justify-center text-[10px] font-medium"
-                >
-                  {relevantExcludedCount > 999 ? "999+" : relevantExcludedCount}
-                </Badge>
-              )}
-            </Button>
+            {/* Visual Separator */}
+            <div className="h-6 w-px bg-border mx-1" />
             
-            {/* Desktop: Show logout button */}
-            <Button variant="outline" className="hidden md:flex" onClick={handleLogoutClick}>
-              <LogOut className="mr-2 h-4 w-4" />
-              Logout
-            </Button>
-            
-            {/* Mobile: Show hamburger menu */}
-            <Sheet open={isMenuOpen} onOpenChange={setIsMenuOpen}>
-              <SheetTrigger asChild>
-                <Button variant="ghost" size="icon" className="md:hidden">
-                  <Menu className="h-5 w-5" />
-                </Button>
-              </SheetTrigger>
-              <SheetContent side="right" className="w-[280px]">
-                <SheetHeader>
-                  <VisuallyHidden>
-                    <SheetTitle>Account Menu</SheetTitle>
-                  </VisuallyHidden>
-                </SheetHeader>
-                <div className="flex flex-col gap-6 p-2">
-                  <div className="flex flex-col gap-2">
-                    <span className="text-xs font-medium text-muted-foreground">Signed in as</span>
-                    <span className="text-sm font-medium">{user?.email}</span>
-                  </div>
-                  <Button variant="destructive" onClick={handleLogoutClick} className="w-full">
-                    <LogOut className="mr-2 h-4 w-4" />
-                    Logout
-                  </Button>
-                </div>
-              </SheetContent>
-            </Sheet>
+            {/* User Menu - Works on all screen sizes */}
+            <UserMenu 
+              onExcludedRecordsClick={() => setExcludedRecordsPanelOpen(true)}
+              excludedRecordsCount={relevantExcludedCount}
+            />
           </div>
         </div>
       </header>
 
-      {/* Logout Confirmation Dialog */}
-      <AlertDialog open={showLogoutDialog} onOpenChange={setShowLogoutDialog}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>Confirm Logout</AlertDialogTitle>
-            <AlertDialogDescription>
-              Are you sure you want to log out? You will need to sign in again to access the dashboard.
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel>Cancel</AlertDialogCancel>
-            <AlertDialogAction onClick={handleConfirmLogout} className="bg-destructive text-destructive-foreground hover:bg-destructive/90">
-              Logout
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
 
       <main className="container mx-auto p-6">
         {/* Combined Filters and Toggle */}
@@ -1298,7 +1342,7 @@ export function DashboardContent() {
                 size="sm"
                 className="min-w-[120px] dark:border-white/10"
               >
-                Setters
+                {isAgent ? "Setter" : "Setters"}
               </Button>
               <Button
                 variant={dashboardType === "confirmers" ? "default" : "outline"}
@@ -1306,7 +1350,7 @@ export function DashboardContent() {
                 size="sm"
                 className="min-w-[120px] dark:border-white/10"
               >
-                Confirmers
+                {isAgent ? "Confirmer" : "Confirmers"}
               </Button>
               <Button
                 variant={dashboardType === "ipp" ? "default" : "outline"}
@@ -1431,13 +1475,14 @@ export function DashboardContent() {
                   </PopoverContent>
                 </Popover>
               )}
-              <Popover open={employeeSelectOpen} onOpenChange={setEmployeeSelectOpen}>
-                <PopoverTrigger asChild>
-                  <Button variant="outline" className="h-9 dark:border-white/10 bg-white dark:bg-transparent w-[140px] justify-between font-normal">
-                    <span className="truncate text-left flex-1">{formatEmployeeSelectionText(selectedEmployees)}</span>
-                    <ChevronDown className="h-4 w-4 opacity-50 shrink-0" />
-                  </Button>
-                </PopoverTrigger>
+              {isAdmin && (
+                <Popover open={employeeSelectOpen} onOpenChange={setEmployeeSelectOpen}>
+                  <PopoverTrigger asChild>
+                    <Button variant="outline" className="h-9 dark:border-white/10 bg-white dark:bg-transparent w-[140px] justify-between font-normal">
+                      <span className="truncate text-left flex-1">{formatEmployeeSelectionText(selectedEmployees)}</span>
+                      <ChevronDown className="h-4 w-4 opacity-50 shrink-0" />
+                    </Button>
+                  </PopoverTrigger>
                 <PopoverContent className="w-[200px] p-0" align="start">
                   <div className="p-2">
                     <div className="flex items-center space-x-2 p-2 hover:bg-accent rounded-sm">
@@ -1492,6 +1537,7 @@ export function DashboardContent() {
                   </div>
                 </PopoverContent>
               </Popover>
+              )}
             </div>
             {timePeriod === "Custom Dates" && (
                 <Popover open={mobilePickerOpen} onOpenChange={setMobilePickerOpen}>
@@ -1599,7 +1645,7 @@ export function DashboardContent() {
         ) : dashboardType === "setters" ? (
           <>
             {/* Featured Metrics */}
-            {!data ? (
+            {(!data || !hasDataForCurrentDashboard) ? (
               <div className="mb-4 grid gap-6 grid-cols-1 sm:grid-cols-2">
                 {[
                   { title: "Horsepower", subtitle: "Combined Performance Score" },
@@ -1658,7 +1704,7 @@ export function DashboardContent() {
             )}
 
             {/* Setters Metrics Gauges */}
-            {!data ? (
+            {(!data || !hasDataForCurrentDashboard) ? (
               <div className="mb-4 grid grid-cols-2 gap-3 md:grid-cols-4">
                 {[
                   "Dials Per Hour",
@@ -1982,7 +2028,7 @@ export function DashboardContent() {
                 </Card>
 
                 {/* Performance Metrics Display */}
-                {!secondaryData ? (
+                {(!secondaryData || !hasDataForSecondaryDashboard) ? (
                   <>
                     {/* Skill Score - Full Width */}
                     <Card className="mb-4 p-4">
@@ -2115,7 +2161,7 @@ export function DashboardContent() {
         ) : (
           <>
             {/* Confirmers Metrics Gauges */}
-            {!data ? (
+            {(!data || !hasDataForCurrentDashboard) ? (
               <div className="mb-4 grid gap-4 grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 xl:grid-cols-5">
                 {[
                   "Contact Rate",
@@ -2215,21 +2261,21 @@ export function DashboardContent() {
           </>
         )}
 
-        {/* Employee Indicators */}
+        {/* Employee Indicators - Show "Team Members" for admins, "Your Stats" for agents */}
         <div className="mt-6">
-          <h2 className="mb-3 text-xl font-semibold">Team Members</h2>
+          <h2 className="mb-3 text-xl font-semibold">{isAdmin ? "Team Members" : "Your Stats"}</h2>
           {employees.length === 0 ? (
             <Card className="p-8">
               <div className="flex flex-col items-center justify-center text-center">
                 <Users className="h-12 w-12 mb-3 text-muted-foreground" />
-                <h3 className="text-lg font-medium">No Team Members</h3>
+                <h3 className="text-lg font-medium">{isAdmin ? "No Team Members" : "No Data"}</h3>
                 <p className="text-sm text-muted-foreground mt-2">
-                  No team member data available for the selected period
+                  No {isAdmin ? "team member" : ""} data available for the selected period
                 </p>
               </div>
             </Card>
           ) : (
-            <div className="grid gap-3 md:grid-cols-2 lg:grid-cols-4">
+            <div className={`grid gap-3 ${isAdmin ? "md:grid-cols-2 lg:grid-cols-4" : "md:grid-cols-1 lg:grid-cols-2"}`}>
               {employees.map((employee) => (
                 <EmployeeIndicator
                   key={employee.id}
@@ -2259,7 +2305,7 @@ export function DashboardContent() {
             open={stlTableOpen}
             onOpenChange={setStlTableOpen}
             excludedIds={getExcludedIdsForTable("stl")}
-            onExcludeRecords={(ids) => excludeRecords("stl", ids)}
+            onExcludeRecords={isAdmin ? ((ids) => excludeRecords("stl", ids)) : undefined}
           />
         </>
       )}
@@ -2272,21 +2318,21 @@ export function DashboardContent() {
             open={conversionTableOpen}
             onOpenChange={setConversionTableOpen}
             excludedIds={getExcludedIdsForTable("conversion")}
-            onExcludeRecords={(ids) => excludeRecords("conversion", ids)}
+            onExcludeRecords={isAdmin ? ((ids) => excludeRecords("conversion", ids)) : undefined}
           />
           <PitchDataTable
             data={filteredConnectedCalls}
             open={pitchTableOpen}
             onOpenChange={setPitchTableOpen}
             excludedIds={getExcludedIdsForTable("pitch")}
-            onExcludeRecords={(ids) => excludeRecords("pitch", ids)}
+            onExcludeRecords={isAdmin ? ((ids) => excludeRecords("pitch", ids)) : undefined}
           />
           <ConnectionDataTable
             data={connectionTableData}
             open={connectionTableOpen}
             onOpenChange={setConnectionTableOpen}
             excludedIds={getExcludedIdsForTable("connection")}
-            onExcludeRecords={(ids) => excludeRecords("connection", ids)}
+            onExcludeRecords={isAdmin ? ((ids) => excludeRecords("connection", ids)) : undefined}
           />
           <DialsPerHourDataTable
             data={dialsPerHourTableData}
@@ -2294,28 +2340,28 @@ export function DashboardContent() {
             open={dialsPerHourTableOpen}
             onOpenChange={setDialsPerHourTableOpen}
             excludedIds={getExcludedIdsForTable("dialsPerHour")}
-            onExcludeRecords={(ids) => excludeRecords("dialsPerHour", ids)}
+            onExcludeRecords={isAdmin ? ((ids) => excludeRecords("dialsPerHour", ids)) : undefined}
           />
           <ConversionQualifiedDataTable
             data={filteredSecondaryPitchedCalls}
             open={conversionQualifiedTableOpen}
             onOpenChange={setConversionQualifiedTableOpen}
             excludedIds={getExcludedIdsForTable("conversionQualified")}
-            onExcludeRecords={(ids) => excludeRecords("conversionQualified", ids)}
+            onExcludeRecords={isAdmin ? ((ids) => excludeRecords("conversionQualified", ids)) : undefined}
           />
           <ConversionUnqualifiedDataTable
             data={filteredSecondaryPitchedCalls}
             open={conversionUnqualifiedTableOpen}
             onOpenChange={setConversionUnqualifiedTableOpen}
             excludedIds={getExcludedIdsForTable("conversionUnqualified")}
-            onExcludeRecords={(ids) => excludeRecords("conversionUnqualified", ids)}
+            onExcludeRecords={isAdmin ? ((ids) => excludeRecords("conversionUnqualified", ids)) : undefined}
           />
           <GrossIssueDataTable
             data={allSecondaryGrossIssueAppointments}
             open={grossIssueTableOpen}
             onOpenChange={setGrossIssueTableOpen}
             excludedIds={getExcludedIdsForTable("grossIssue")}
-            onExcludeRecords={(ids) => excludeRecords("grossIssue", ids)}
+            onExcludeRecords={isAdmin ? ((ids) => excludeRecords("grossIssue", ids)) : undefined}
             timePeriod={secondaryTimePeriod}
             dateRange={secondaryConfirmedDateRange}
             timeRange={secondaryConfirmedTimeRange}
@@ -2324,15 +2370,18 @@ export function DashboardContent() {
         </>
       )}
 
-      {/* Excluded Records Panel */}
-      <ExcludedRecordsPanel
-        open={excludedRecordsPanelOpen}
-        onOpenChange={setExcludedRecordsPanelOpen}
-        excludedRecords={excludedRecords}
-        onRestoreRecords={restoreByDocIds}
-        loading={excludedRecordsLoading}
-        availableRecordIds={availableRecordIdsForPanel}
-      />
+      {/* Excluded Records Panel - Admin Only */}
+      {isAdmin && (
+        <ExcludedRecordsPanel
+          open={excludedRecordsPanelOpen}
+          onOpenChange={setExcludedRecordsPanelOpen}
+          excludedRecords={excludedRecords}
+          onRestoreRecords={restoreByDocIds}
+          loading={excludedRecordsLoading}
+          availableRecordIds={availableRecordIdsForPanel}
+        />
+      )}
+
     </div>
   )
 }

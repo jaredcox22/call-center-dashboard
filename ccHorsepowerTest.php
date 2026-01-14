@@ -205,7 +205,15 @@ $holidays = [
     }else{
         // STEP 1: Get unique deputy IDs and build Deputy-to-LP mapping from a lightweight query
         // This query gets all unique combinations of deputy ID and LP employee ID
+        // If lpId is provided, filter to only that LP ID
+        $lpId = isset($_GET['lpId']) ? intval($_GET['lpId']) : null;
         $deputyMappingQuery = "SELECT DISTINCT emp_user_12, emp_id, FirstName, LastName FROM cls_Calls LEFT JOIN emp_Employees ON emp_id = emp_Employees.id WHERE CallDate BETWEEN '$start' AND '$end' AND ResultCode NOT LIKE '%ND%' AND Dialer = 'True' AND emp_user_12 > 0";
+        
+        // If lpId is provided, filter to only that LP ID
+        if ($lpId !== null && $lpId > 0) {
+            $deputyMappingQuery .= " AND emp_id = " . $lpId;
+        }
+        
         $deputyMappingResults = curlCall("$endpoint/lp/customReport.php?rptSQL=" . urlencode($deputyMappingQuery));
         
         // Build mapping of Deputy ID to LP employee ID and collect all deputy IDs
@@ -807,18 +815,19 @@ $holidays = [
             return $actualTotal;
         }
 
+        // Get employee name for lpId filtering (if lpId is provided)
+        $scorecardFilterEmployeeName = null;
+        if ($lpId !== null && $lpId > 0) {
+            $empNameQuery = "SELECT FirstName, LastName FROM emp_Employees WHERE id = " . $lpId;
+            $empNameResult = curlCall("$endpoint/lp/customReport.php?rptSQL=" . urlencode($empNameQuery));
+            if (!empty($empNameResult) && isset($empNameResult[0]['FirstName']) && isset($empNameResult[0]['LastName'])) {
+                $scorecardFilterEmployeeName = trim($empNameResult[0]['FirstName']) . " " . trim($empNameResult[0]['LastName']);
+            }
+        }
+
         // Process setters scorecards
         foreach($settersScorecardsRaw as $scorecard){
-            $scorecardData = [
-                'id' => $scorecard['id'] ?? null,
-                'form_instance_id' => $scorecard['id'] ?? null,
-                'form_id' => $scorecard['form_id'] ?? null,
-                'status' => $scorecard['status'] ?? null,
-                'created_at' => $scorecard['created_at'] ?? null,
-                'updated_at' => $scorecard['updated_at'] ?? null,
-            ];
-            
-            // Extract employee name from variables_used
+            // Extract employee name from variables_used first (for filtering)
             $employeeName = null;
             $callDate = null;
             if(isset($scorecard['variables_used'])){
@@ -835,6 +844,20 @@ $holidays = [
                     }
                 }
             }
+            
+            // If lpId is provided, filter scorecards to only include those for that employee
+            if ($scorecardFilterEmployeeName !== null && $employeeName !== $scorecardFilterEmployeeName) {
+                continue;
+            }
+            
+            $scorecardData = [
+                'id' => $scorecard['id'] ?? null,
+                'form_instance_id' => $scorecard['id'] ?? null,
+                'form_id' => $scorecard['form_id'] ?? null,
+                'status' => $scorecard['status'] ?? null,
+                'created_at' => $scorecard['created_at'] ?? null,
+                'updated_at' => $scorecard['updated_at'] ?? null,
+            ];
             
             $scorecardData['callDate'] = $callDate;
             $scorecardData['employee'] = $employeeName;
@@ -853,16 +876,7 @@ $holidays = [
 
         // Process confirmers scorecards
         foreach($confirmersScorecardsRaw as $scorecard){
-            $scorecardData = [
-                'id' => $scorecard['id'] ?? null,
-                'form_instance_id' => $scorecard['id'] ?? null,
-                'form_id' => $scorecard['form_id'] ?? null,
-                'status' => $scorecard['status'] ?? null,
-                'created_at' => $scorecard['created_at'] ?? null,
-                'updated_at' => $scorecard['updated_at'] ?? null,
-            ];
-            
-            // Extract employee name from variables_used
+            // Extract employee name from variables_used first (for filtering)
             $employeeName = null;
             $callDate = null;
             if(isset($scorecard['variables_used'])){
@@ -879,6 +893,20 @@ $holidays = [
                     }
                 }
             }
+            
+            // If lpId is provided, filter scorecards to only include those for that employee
+            if ($scorecardFilterEmployeeName !== null && $employeeName !== $scorecardFilterEmployeeName) {
+                continue;
+            }
+            
+            $scorecardData = [
+                'id' => $scorecard['id'] ?? null,
+                'form_instance_id' => $scorecard['id'] ?? null,
+                'form_id' => $scorecard['form_id'] ?? null,
+                'status' => $scorecard['status'] ?? null,
+                'created_at' => $scorecard['created_at'] ?? null,
+                'updated_at' => $scorecard['updated_at'] ?? null,
+            ];
             
             $scorecardData['callDate'] = $callDate;
             $scorecardData['employee'] = $employeeName;
@@ -952,6 +980,12 @@ $holidays = [
     if(array_key_exists('secondaryDateRange', $_GET)){
         // STEP 1: Get unique deputy IDs for secondary date range
         $secondaryDeputyMappingQuery = "SELECT DISTINCT emp_user_12, emp_id, FirstName, LastName FROM cls_Calls LEFT JOIN emp_Employees ON emp_id = emp_Employees.id WHERE CallDate BETWEEN '$secondaryStart' AND '$secondaryEnd' AND ResultCode NOT LIKE '%ND%' AND Dialer = 'True' AND emp_user_12 > 0";
+        
+        // If lpId is provided, filter secondary data to only that LP ID
+        if ($lpId !== null && $lpId > 0) {
+            $secondaryDeputyMappingQuery .= " AND emp_id = " . $lpId;
+        }
+        
         $secondaryDeputyMappingResults = curlCall("$endpoint/lp/customReport.php?rptSQL=" . urlencode($secondaryDeputyMappingQuery));
         
         // Build mapping and collect deputy IDs
@@ -1284,15 +1318,7 @@ $holidays = [
 
         // Process secondary setters scorecards
         foreach($secondarySettersScorecardsRaw as $scorecard){
-            $scorecardData = [
-                'id' => $scorecard['id'] ?? null,
-                'form_instance_id' => $scorecard['id'] ?? null,
-                'form_id' => $scorecard['form_id'] ?? null,
-                'status' => $scorecard['status'] ?? null,
-                'created_at' => $scorecard['created_at'] ?? null,
-                'updated_at' => $scorecard['updated_at'] ?? null,
-            ];
-            
+            // Extract employee name first for filtering
             $employeeName = null;
             $callDate = null;
             if(isset($scorecard['variables_used'])){
@@ -1309,6 +1335,20 @@ $holidays = [
                     }
                 }
             }
+            
+            // If lpId is provided, filter scorecards to only include those for that employee
+            if ($scorecardFilterEmployeeName !== null && $employeeName !== $scorecardFilterEmployeeName) {
+                continue;
+            }
+            
+            $scorecardData = [
+                'id' => $scorecard['id'] ?? null,
+                'form_instance_id' => $scorecard['id'] ?? null,
+                'form_id' => $scorecard['form_id'] ?? null,
+                'status' => $scorecard['status'] ?? null,
+                'created_at' => $scorecard['created_at'] ?? null,
+                'updated_at' => $scorecard['updated_at'] ?? null,
+            ];
             
             $scorecardData['callDate'] = $callDate;
             $scorecardData['employee'] = $employeeName;
@@ -1326,15 +1366,7 @@ $holidays = [
 
         // Process secondary confirmers scorecards
         foreach($secondaryConfirmersScorecardsRaw as $scorecard){
-            $scorecardData = [
-                'id' => $scorecard['id'] ?? null,
-                'form_instance_id' => $scorecard['id'] ?? null,
-                'form_id' => $scorecard['form_id'] ?? null,
-                'status' => $scorecard['status'] ?? null,
-                'created_at' => $scorecard['created_at'] ?? null,
-                'updated_at' => $scorecard['updated_at'] ?? null,
-            ];
-            
+            // Extract employee name first for filtering
             $employeeName = null;
             $callDate = null;
             if(isset($scorecard['variables_used'])){
@@ -1351,6 +1383,20 @@ $holidays = [
                     }
                 }
             }
+            
+            // If lpId is provided, filter scorecards to only include those for that employee
+            if ($scorecardFilterEmployeeName !== null && $employeeName !== $scorecardFilterEmployeeName) {
+                continue;
+            }
+            
+            $scorecardData = [
+                'id' => $scorecard['id'] ?? null,
+                'form_instance_id' => $scorecard['id'] ?? null,
+                'form_id' => $scorecard['form_id'] ?? null,
+                'status' => $scorecard['status'] ?? null,
+                'created_at' => $scorecard['created_at'] ?? null,
+                'updated_at' => $scorecard['updated_at'] ?? null,
+            ];
             
             $scorecardData['callDate'] = $callDate;
             $scorecardData['employee'] = $employeeName;
@@ -1478,6 +1524,17 @@ $holidays = [
 
     $rtdData = curlCall("$endpoint/lp/customReport.php?rptSQL=" . urlencode($query));
     $responseData['stl'] = [];
+    
+    // If lpId is provided, get the employee name to filter STL data
+    $lpIdEmployeeName = null;
+    if ($lpId !== null && $lpId > 0) {
+        $empNameQuery = "SELECT FirstName, LastName FROM emp_Employees WHERE id = " . $lpId;
+        $empNameResult = curlCall("$endpoint/lp/customReport.php?rptSQL=" . urlencode($empNameQuery));
+        if (!empty($empNameResult) && isset($empNameResult[0]['FirstName']) && isset($empNameResult[0]['LastName'])) {
+            $lpIdEmployeeName = trim($empNameResult[0]['FirstName']) . " " . trim($empNameResult[0]['LastName']);
+        }
+    }
+    
     foreach($rtdData as $response){
         // Exclude records matching srs_id == 6 exclusion criteria (matching getData.php logic)
         if(isset($response['srs_id']) && $response['srs_id'] == 6 && 
@@ -1499,6 +1556,13 @@ $holidays = [
             continue;
         }
         
+        $employeeName = $response['FirstName'] . " " . $response['LastName'];
+        
+        // If lpId is provided, filter STL data to only include records for that employee
+        if ($lpIdEmployeeName !== null && $employeeName !== $lpIdEmployeeName) {
+            continue;
+        }
+        
         // Calculate STL (checkout to dial time) using business hours
         $stlValue = getBusinessHourDiff($response['CheckOutDate'], $response['CallDate']);
         
@@ -1506,7 +1570,7 @@ $holidays = [
         if($stlValue !== null){
             $responseData['stl'][] = [
                 'leadId' => $response['leadId'] ?? null,
-                'employee' => $response['FirstName'] . " " . $response['LastName'],
+                'employee' => $employeeName,
                 'stl' => $stlValue,
                 'cst_id' => $response['cst_id'],
                 'dateReceived' => $response['DateReceived'] ?? null,

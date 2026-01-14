@@ -6,17 +6,30 @@ import { useEffect } from "react"
 import { useRouter } from "next/navigation"
 import { useAuth } from "@/contexts/auth-context"
 
-export function ProtectedRoute({ children }: { children: React.ReactNode }) {
-  const { user, loading } = useAuth()
+interface ProtectedRouteProps {
+  children: React.ReactNode
+  adminOnly?: boolean
+}
+
+export function ProtectedRoute({ children, adminOnly = false }: ProtectedRouteProps) {
+  const { user, loading, userDataLoading, isAdmin, userData } = useAuth()
   const router = useRouter()
 
   useEffect(() => {
-    if (!loading && !user) {
+    // Wait for both auth and user data to load
+    if (!loading && !userDataLoading && !user) {
       router.push("/login")
+      return
     }
-  }, [user, loading, router])
 
-  if (loading) {
+    // Only redirect admin-only routes after user data is loaded
+    if (!loading && !userDataLoading && user && adminOnly && !isAdmin) {
+      router.push("/dashboard")
+    }
+  }, [user, loading, userDataLoading, router, adminOnly, isAdmin])
+
+  // Show loading while auth or user data is loading
+  if (loading || userDataLoading) {
     return (
       <div className="flex h-screen items-center justify-center">
         <div className="h-8 w-8 animate-spin rounded-full border-4 border-primary border-t-transparent" />
@@ -25,6 +38,11 @@ export function ProtectedRoute({ children }: { children: React.ReactNode }) {
   }
 
   if (!user) {
+    return null
+  }
+
+  // Wait for user data before rendering admin-only routes
+  if (adminOnly && !isAdmin) {
     return null
   }
 
