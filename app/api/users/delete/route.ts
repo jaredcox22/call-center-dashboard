@@ -26,35 +26,23 @@ async function initializeAdmin() {
           throw new Error("Failed to parse FIREBASE_SERVICE_ACCOUNT_KEY. Make sure it's valid JSON.")
         }
       } else if (process.env.GOOGLE_APPLICATION_CREDENTIALS) {
-        // Use credentials file path
+        // Use credentials file path (for local development)
         adminApp = initializeApp()
       } else {
-        // Try to use project ID with Application Default Credentials
-        const projectId = process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID || process.env.FIREBASE_PROJECT_ID
-        
-        if (!projectId) {
-          throw new Error(
-            "Firebase Admin requires credentials. Please set up one of the following:\n" +
-            "1. FIREBASE_SERVICE_ACCOUNT_KEY (recommended) - JSON string of service account key\n" +
-            "2. GOOGLE_APPLICATION_CREDENTIALS - Path to service account JSON file\n" +
-            "3. Or ensure Application Default Credentials are configured\n" +
-            "\nTo get a service account key:\n" +
-            "1. Go to Firebase Console → Project Settings → Service Accounts\n" +
-            "2. Click 'Generate New Private Key'\n" +
-            "3. Add the JSON content to FIREBASE_SERVICE_ACCOUNT_KEY in your .env.local file"
-          )
-        }
-        
-        try {
-          adminApp = initializeApp({
-            projectId: projectId,
-          })
-        } catch (initError: any) {
-          throw new Error(
-            `Failed to initialize Firebase Admin: ${initError.message}\n` +
-            "Please set up FIREBASE_SERVICE_ACCOUNT_KEY or GOOGLE_APPLICATION_CREDENTIALS."
-          )
-        }
+        // Require FIREBASE_SERVICE_ACCOUNT_KEY - Application Default Credentials don't work in serverless environments
+        throw new Error(
+          "Firebase Admin requires credentials. FIREBASE_SERVICE_ACCOUNT_KEY environment variable is required.\n\n" +
+          "To set up in Vercel:\n" +
+          "1. Go to Firebase Console → Project Settings → Service Accounts\n" +
+          "2. Click 'Generate New Private Key' and download the JSON file\n" +
+          "3. Go to Vercel Dashboard → Your Project → Settings → Environment Variables\n" +
+          "4. Add FIREBASE_SERVICE_ACCOUNT_KEY with the entire JSON content as the value\n" +
+          "   (You can minify the JSON or keep it formatted - both work)\n" +
+          "5. Redeploy your application\n\n" +
+          "For local development, you can also use:\n" +
+          "- FIREBASE_SERVICE_ACCOUNT_KEY in your .env.local file, OR\n" +
+          "- GOOGLE_APPLICATION_CREDENTIALS pointing to the service account JSON file path"
+        )
       }
     } else {
       adminApp = getApps()[0]
