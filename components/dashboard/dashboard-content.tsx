@@ -2119,7 +2119,7 @@ export function DashboardContent() {
                         title="Conversion % (Un-Qualified)"
                         value={secondaryData.settersMetrics.conversionUnqualified}
                         max={100}
-                        target={33}
+                        target={18}
                         color={getGaugeColor(secondaryData.settersMetrics.conversionUnqualified, [10, 13, 17, 20])}
                         unit="%"
                         size="small"
