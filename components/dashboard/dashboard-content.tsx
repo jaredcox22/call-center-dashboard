@@ -2120,15 +2120,15 @@ export function DashboardContent() {
                         value={secondaryData.settersMetrics.conversionUnqualified}
                         max={100}
                         target={33}
-                        color={getGaugeColor(secondaryData.settersMetrics.conversionUnqualified, [21, 26, 32, 39])}
+                        color={getGaugeColor(secondaryData.settersMetrics.conversionUnqualified, [10, 13, 17, 20])}
                         unit="%"
                         size="small"
                         ranges={[
-                          { label: "Bad", min: 0, max: 21, color: "#ef4444" },
-                          { label: "Average", min: 22, max: 26, color: "#f97316" },
-                          { label: "Good", min: 27, max: 32, color: "#eab308" },
-                          { label: "Excellent", min: 33, max: 39, color: "#22c55e" },
-                          { label: "Elite", min: 40, max: 100, color: "#3b82f6" },
+                          { label: "Bad", min: 0, max: 10, color: "#ef4444" },
+                          { label: "Average", min: 11, max: 13, color: "#f97316" },
+                          { label: "Good", min: 14, max: 17, color: "#eab308" },
+                          { label: "Excellent", min: 18, max: 20, color: "#22c55e" },
+                          { label: "Elite", min: 21, max: 100, color: "#3b82f6" },
                         ]}
                         formula="(Total Unqualified ÷ Total Pitched) × 100"
                         showDataIcon={true}
