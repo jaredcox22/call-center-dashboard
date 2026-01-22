@@ -1093,6 +1093,8 @@ export function DashboardContent() {
       positive: call.positive || 0,
       qualified: call.qualified ?? null,
       id: call.id ?? null,
+      lds_id: call.lds_id ?? null,
+      cst_id: call.cst_id ?? null,
     }))
   })() : []
 

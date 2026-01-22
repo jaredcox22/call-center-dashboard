@@ -395,7 +395,7 @@ $holidays = [
         // Fetch setters calls - only for employees clocked into Setter operational unit
         if(!empty($settersDeputyIDs)){
             $settersDeputyIdsList = implode(',', $settersDeputyIDs);
-            $settersCallsQuery = "SELECT emp_user_12, emp_id, LastName, cls_Calls.id as id, FirstName, CallDate, ResultCode, cty_id, Connected, Pitched, Positive, qualified, lds_Leads.ApptSet, lds_Leads.Issued FROM cls_Calls LEFT JOIN clr_CallResults ON ResultCode = clr_CallResults.id LEFT JOIN emp_Employees ON emp_id = emp_Employees.id LEFT JOIN lds_Leads ON cls_Calls.lds_id = lds_Leads.id LEFT JOIN srs_SourceSubs ON lds_Leads.srs_id = srs_SourceSubs.id WHERE CallDate BETWEEN '$start' AND '$end' AND ResultCode NOT IN ('*ND', 'TXT') AND Dialer = 'True' AND emp_user_12 IN ($settersDeputyIdsList) AND cty_id NOT IN ('C', 'IPP')";
+            $settersCallsQuery = "SELECT emp_user_12, emp_id, LastName, cls_Calls.id as id, FirstName, CallDate, ResultCode, cty_id, Connected, Pitched, Positive, qualified, lds_Leads.ApptSet, lds_Leads.Issued, cls_Calls.lds_id, cls_Calls.cst_id FROM cls_Calls LEFT JOIN clr_CallResults ON ResultCode = clr_CallResults.id LEFT JOIN emp_Employees ON emp_id = emp_Employees.id LEFT JOIN lds_Leads ON cls_Calls.lds_id = lds_Leads.id LEFT JOIN srs_SourceSubs ON lds_Leads.srs_id = srs_SourceSubs.id WHERE CallDate BETWEEN '$start' AND '$end' AND ResultCode NOT IN ('*ND', 'TXT') AND Dialer = 'True' AND emp_user_12 IN ($settersDeputyIdsList) AND cty_id NOT IN ('C', 'IPP')";
             $settersCalls = curlCall("$endpoint/lp/customReport.php?rptSQL=" . urlencode($settersCallsQuery));
         }
         
@@ -442,6 +442,8 @@ $holidays = [
                 'qualified' => ($call['qualified'] == 1 ? true : false),
                 'ApptSet' => $call['ApptSet'] ?? null,
                 'Issued' => $call['Issued'] ?? null,
+                'lds_id' => $call['lds_id'] ?? null,
+                'cst_id' => $call['cst_id'] ?? null,
             ];
         }
 
@@ -1137,7 +1139,7 @@ $holidays = [
         // Fetch secondary setters calls - only for employees clocked into Setter operational unit
         if(!empty($secondarySettersDeputyIDs)){
             $secondarySettersDeputyIdsList = implode(',', $secondarySettersDeputyIDs);
-            $secondarySettersCallsQuery = "SELECT emp_user_12, emp_id, LastName, cls_Calls.id as id, FirstName, CallDate, ResultCode, cty_id, Connected, Pitched, Positive, qualified, lds_Leads.ApptSet, lds_Leads.Issued FROM cls_Calls LEFT JOIN clr_CallResults ON ResultCode = clr_CallResults.id LEFT JOIN emp_Employees ON emp_id = emp_Employees.id LEFT JOIN lds_Leads ON cls_Calls.lds_id = lds_Leads.id LEFT JOIN srs_SourceSubs ON lds_Leads.srs_id = srs_SourceSubs.id WHERE CallDate BETWEEN '$secondaryStart' AND '$secondaryEnd' AND ResultCode NOT IN ('*ND', 'TXT') AND Dialer = 'True' AND emp_user_12 IN ($secondarySettersDeputyIdsList) AND cty_id NOT IN ('C', 'IPP')";
+            $secondarySettersCallsQuery = "SELECT emp_user_12, emp_id, LastName, cls_Calls.id as id, FirstName, CallDate, ResultCode, cty_id, Connected, Pitched, Positive, qualified, lds_Leads.ApptSet, lds_Leads.Issued, cls_Calls.lds_id, cls_Calls.cst_id FROM cls_Calls LEFT JOIN clr_CallResults ON ResultCode = clr_CallResults.id LEFT JOIN emp_Employees ON emp_id = emp_Employees.id LEFT JOIN lds_Leads ON cls_Calls.lds_id = lds_Leads.id LEFT JOIN srs_SourceSubs ON lds_Leads.srs_id = srs_SourceSubs.id WHERE CallDate BETWEEN '$secondaryStart' AND '$secondaryEnd' AND ResultCode NOT IN ('*ND', 'TXT') AND Dialer = 'True' AND emp_user_12 IN ($secondarySettersDeputyIdsList) AND cty_id NOT IN ('C', 'IPP')";
             $secondarySettersCalls = curlCall("$endpoint/lp/customReport.php?rptSQL=" . urlencode($secondarySettersCallsQuery));
         }
         
@@ -1179,6 +1181,8 @@ $holidays = [
                 'qualified' => ($call['qualified'] == 1 ? true : false),
                 'ApptSet' => $call['ApptSet'] ?? null,
                 'Issued' => $call['Issued'] ?? null,
+                'lds_id' => $call['lds_id'] ?? null,
+                'cst_id' => $call['cst_id'] ?? null,
             ];
         }
 

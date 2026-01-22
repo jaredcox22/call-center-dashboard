@@ -17,7 +17,7 @@ import {
   TableRow,
 } from "@/components/ui/table"
 import { Input } from "@/components/ui/input"
-import { ArrowUpDown, ArrowUp, ArrowDown, Info, ChevronDown } from "lucide-react"
+import { ArrowUpDown, ArrowUp, ArrowDown, Info, ChevronDown, ExternalLink } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { format } from "date-fns"
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
@@ -50,6 +50,8 @@ interface ConversionQualifiedRecord {
   positive: number
   qualified: boolean | null
   id?: number | null
+  lds_id?: number | null
+  cst_id?: number | null
 }
 
 interface ConversionQualifiedDataTableProps {
@@ -60,7 +62,7 @@ interface ConversionQualifiedDataTableProps {
   onExcludeRecords?: (recordIds: string[]) => void
 }
 
-type SortField = "employee" | "date" | "positive" | "qualified" | "id"
+type SortField = "employee" | "date" | "positive" | "qualified" | "id" | "lds_id" | "cst_id"
 type SortDirection = "asc" | "desc" | null
 
 export function ConversionQualifiedDataTable({ 
@@ -116,6 +118,8 @@ export function ConversionQualifiedDataTable({
       return (
         (record.employee?.toLowerCase() ?? "").includes(query) ||
         (record.id?.toString() ?? "").includes(query) ||
+        (record.lds_id?.toString() ?? "").includes(query) ||
+        (record.cst_id?.toString() ?? "").includes(query) ||
         formatDate(record.date).toLowerCase().includes(query) ||
         (record.positive === 1 ? "yes" : "no").includes(query)
       )
@@ -308,7 +312,7 @@ export function ConversionQualifiedDataTable({
           {/* Search Input and Actions */}
           <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
             <Input
-              placeholder="Search by employee, date, call ID, or conversion status..."
+              placeholder="Search by employee, date, call ID, lead ID, customer ID, or conversion status..."
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
               className="w-full"
@@ -383,6 +387,28 @@ export function ConversionQualifiedDataTable({
                       {getSortIcon("id")}
                     </Button>
                   </TableHead>
+                  <TableHead className="w-[100px] hidden sm:table-cell">
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="h-8 -ml-2"
+                      onClick={() => handleSort("lds_id")}
+                    >
+                      Lead ID
+                      {getSortIcon("lds_id")}
+                    </Button>
+                  </TableHead>
+                  <TableHead className="w-[120px] hidden sm:table-cell">
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="h-8 -ml-2"
+                      onClick={() => handleSort("cst_id")}
+                    >
+                      Customer ID
+                      {getSortIcon("cst_id")}
+                    </Button>
+                  </TableHead>
                   {onExcludeRecords && (
                     <TableHead className="w-[50px]">Actions</TableHead>
                   )}
@@ -391,7 +417,7 @@ export function ConversionQualifiedDataTable({
               <TableBody>
                 {filteredAndSortedData.length === 0 ? (
                   <TableRow>
-                    <TableCell colSpan={onExcludeRecords ? 6 : 4} className="text-center py-8 text-muted-foreground">
+                    <TableCell colSpan={onExcludeRecords ? 8 : 6} className="text-center py-8 text-muted-foreground">
                       {searchQuery ? "No records found matching your search." : "No data available."}
                     </TableCell>
                   </TableRow>
@@ -427,6 +453,24 @@ export function ConversionQualifiedDataTable({
                         </TableCell>
                         <TableCell className="text-sm text-muted-foreground hidden sm:table-cell">
                           {record.id ?? "N/A"}
+                        </TableCell>
+                        <TableCell className="text-sm text-muted-foreground hidden sm:table-cell">
+                          {record.lds_id ?? "N/A"}
+                        </TableCell>
+                        <TableCell className="text-sm hidden sm:table-cell">
+                          {record.cst_id ? (
+                            <a
+                              href={`https://qi09a.leadperfection.com/LeadDetail.html?custid=${record.cst_id}`}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="text-blue-600 hover:text-blue-800 dark:text-blue-400 dark:hover:text-blue-300 hover:underline inline-flex items-center gap-1"
+                            >
+                              {record.cst_id}
+                              <ExternalLink className="h-3 w-3" />
+                            </a>
+                          ) : (
+                            <span className="text-muted-foreground">N/A</span>
+                          )}
                         </TableCell>
                         {onExcludeRecords && (
                           <TableCell>
