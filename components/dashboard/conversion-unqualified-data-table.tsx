@@ -52,6 +52,13 @@ interface ConversionUnqualifiedRecord {
   id?: number | null
   lds_id?: number | null
   cst_id?: number | null
+  cqd_id?: number | null
+}
+
+interface CallQueueDetail {
+  id?: number | null
+  cqd_id?: number | null
+  Descr?: string
 }
 
 interface ConversionUnqualifiedDataTableProps {
@@ -60,10 +67,17 @@ interface ConversionUnqualifiedDataTableProps {
   onOpenChange: (open: boolean) => void
   excludedIds?: Set<string>
   onExcludeRecords?: (recordIds: string[]) => void
+  callQueueDetails?: CallQueueDetail[]
 }
 
-type SortField = "employee" | "date" | "positive" | "qualified" | "id" | "lds_id" | "cst_id"
+type SortField = "employee" | "date" | "positive" | "qualified" | "id" | "lds_id" | "cst_id" | "cqd_id"
 type SortDirection = "asc" | "desc" | null
+
+function getCallBucketLabel(cqdId: number | null | undefined, callQueueDetails: CallQueueDetail[] = []): string {
+  if (cqdId == null || cqdId === 0) return "No Call Bucket"
+  const item = callQueueDetails.find((q) => Number(q.id ?? q.cqd_id) === Number(cqdId))
+  return item?.Descr ?? String(cqdId)
+}
 
 export function ConversionUnqualifiedDataTable({ 
   data, 
@@ -71,6 +85,7 @@ export function ConversionUnqualifiedDataTable({
   onOpenChange,
   excludedIds = new Set(),
   onExcludeRecords,
+  callQueueDetails = [],
 }: ConversionUnqualifiedDataTableProps) {
   const [searchQuery, setSearchQuery] = useState("")
   const [sortField, setSortField] = useState<SortField>("date")
@@ -120,6 +135,7 @@ export function ConversionUnqualifiedDataTable({
         (record.id?.toString() ?? "").includes(query) ||
         (record.lds_id?.toString() ?? "").includes(query) ||
         (record.cst_id?.toString() ?? "").includes(query) ||
+        getCallBucketLabel(record.cqd_id, callQueueDetails).toLowerCase().includes(query) ||
         formatDate(record.date).toLowerCase().includes(query) ||
         (record.positive === 1 ? "yes" : "no").includes(query)
       )
@@ -141,6 +157,12 @@ export function ConversionUnqualifiedDataTable({
           bValue = bValue ? new Date(bValue).getTime() : 0
         }
 
+        // Handle cqd_id: sort by label for display consistency
+        if (sortField === "cqd_id") {
+          aValue = getCallBucketLabel(a.cqd_id, callQueueDetails)
+          bValue = getCallBucketLabel(b.cqd_id, callQueueDetails)
+        }
+
         // Handle strings
         if (typeof aValue === "string") {
           aValue = aValue.toLowerCase()
@@ -154,7 +176,7 @@ export function ConversionUnqualifiedDataTable({
     }
 
     return filtered
-  }, [unqualifiedData, searchQuery, sortField, sortDirection])
+  }, [unqualifiedData, searchQuery, sortField, sortDirection, callQueueDetails])
 
   // Clear selection when dialog closes
   const handleOpenChange = useCallback((newOpen: boolean) => {
@@ -409,6 +431,17 @@ export function ConversionUnqualifiedDataTable({
                       {getSortIcon("cst_id")}
                     </Button>
                   </TableHead>
+                  <TableHead className="w-[120px] hidden sm:table-cell">
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="h-8 -ml-2"
+                      onClick={() => handleSort("cqd_id")}
+                    >
+                      Call Bucket
+                      {getSortIcon("cqd_id")}
+                    </Button>
+                  </TableHead>
                   {onExcludeRecords && (
                     <TableHead className="w-[50px]">Actions</TableHead>
                   )}
@@ -417,7 +450,7 @@ export function ConversionUnqualifiedDataTable({
               <TableBody>
                 {filteredAndSortedData.length === 0 ? (
                   <TableRow>
-                    <TableCell colSpan={onExcludeRecords ? 8 : 6} className="text-center py-8 text-muted-foreground">
+                    <TableCell colSpan={onExcludeRecords ? 9 : 7} className="text-center py-8 text-muted-foreground">
                       {searchQuery ? "No records found matching your search." : "No data available."}
                     </TableCell>
                   </TableRow>
@@ -471,6 +504,9 @@ export function ConversionUnqualifiedDataTable({
                           ) : (
                             <span className="text-muted-foreground">N/A</span>
                           )}
+                        </TableCell>
+                        <TableCell className="text-sm text-muted-foreground hidden sm:table-cell">
+                          {getCallBucketLabel(record.cqd_id, callQueueDetails)}
                         </TableCell>
                         {onExcludeRecords && (
                           <TableCell>

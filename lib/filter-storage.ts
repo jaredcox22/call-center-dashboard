@@ -23,6 +23,9 @@ export interface FilterState {
     startHour: number | null
     endHour: number | null
   }
+  callBuckets?: string[]
+  /** @deprecated use callBuckets */
+  callBucket?: string
 }
 
 interface StoredFilters {
