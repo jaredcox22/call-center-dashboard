@@ -451,7 +451,7 @@ const transformApiData = (
     // Calculate horsepower per employee using the same formula as team metric (only for setters)
     const horsepower = dashboardType === 'setters' && dials > 0 && hours > 0
       ? Math.round(
-          ((dials - connected) + 
+          (((dials - connected) * 1.2) + 
           ((connected - pitched) * 1.5) + 
           ((pitched - positive) * 4) + 
           (positive * 10)) / hours
@@ -563,14 +563,14 @@ const transformApiData = (
   }
   
   // Calculate horsepower using weighted point system (normalized per hour):
-  // - No connection: 1 point per dial
+  // - No connection (dials): 1.2 points per dial
   // - Connected but no pitch: 1.5 points per connection
   // - Pitched but no conversion: 4 points per pitch
   // - Conversion: 10 points per positive
-  // Formula: ((Dials - Connected) + ((Connected - Pitched) * 1.5) + ((Pitched - Positive) * 4) + (Positive * 10)) / Total Hours
+  // Formula: ((Dials - Connected) * 1.2 + ((Connected - Pitched) * 1.5) + ((Pitched - Positive) * 4) + (Positive * 10)) / Total Hours
   const horsepower = totalCalls > 0 && totalHours > 0
     ? Math.round(
-        ((totalCalls - totalConnected) + 
+        (((totalCalls - totalConnected) * 1.2) + 
         ((totalConnected - totalPitched) * 1.5) + 
         ((totalPitched - totalPositive) * 4) + 
         (totalPositive * 10)) / totalHours
@@ -1680,7 +1680,7 @@ export function DashboardContent() {
                     { label: "Excellent", min: 56, max: 71, color: "#22c55e" },
                     { label: "Elite", min: 72, color: "#3b82f6" },
                   ]}
-                  formula="((Dials - Connected) + ((Connected - Pitched) × 1.5) + ((Pitched - Positive) × 4) + (Positive × 10)) ÷ Total Hours"
+                  formula="((Dials - Connected) × 1.2 + ((Connected - Pitched) × 1.5) + ((Pitched - Positive) × 4) + (Positive × 10)) ÷ Total Hours"
                 />
                 <FeaturedMetricCard
                   title="Checkout to Dial Time"
