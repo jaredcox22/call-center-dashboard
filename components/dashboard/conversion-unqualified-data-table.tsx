@@ -24,6 +24,12 @@ import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible"
 import { Card } from "@/components/ui/card"
 import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "@/components/ui/popover"
+import { Checkbox } from "@/components/ui/checkbox"
+import {
   SelectionCheckbox,
   SelectAllCheckbox,
   ExcludeRowButton,
@@ -61,6 +67,25 @@ interface CallQueueDetail {
   Descr?: string
 }
 
+function getAllCallBucketValues(callQueueDetails: CallQueueDetail[] = []): string[] {
+  const sorted = [...callQueueDetails].sort((a, b) => (a.Descr ?? "").localeCompare(b.Descr ?? ""))
+  return ["none", ...sorted.map((q) => String(q.id ?? q.cqd_id))]
+}
+
+function formatCallBucketSelectionText(selectedCallBuckets: string[], callQueueDetails: CallQueueDetail[] = []): string {
+  const allValues = getAllCallBucketValues(callQueueDetails)
+  const allSelected = allValues.length > 0 && selectedCallBuckets.length === allValues.length && allValues.every((v) => selectedCallBuckets.includes(v))
+  if (selectedCallBuckets.length === 0 || allSelected) return "All Call Buckets"
+  const labels = selectedCallBuckets.map((v) => {
+    if (v === "none") return "No Call Bucket"
+    const item = callQueueDetails.find((q) => String(q.id ?? q.cqd_id) === v)
+    return item?.Descr ?? v
+  })
+  if (labels.length === 1) return labels[0]
+  if (labels.length === 2) return `${labels[0]}, ${labels[1]}`
+  return `${labels.length} selected`
+}
+
 interface ConversionUnqualifiedDataTableProps {
   data: ConversionUnqualifiedRecord[]
   open: boolean
@@ -68,6 +93,8 @@ interface ConversionUnqualifiedDataTableProps {
   excludedIds?: Set<string>
   onExcludeRecords?: (recordIds: string[]) => void
   callQueueDetails?: CallQueueDetail[]
+  selectedCallBuckets?: string[]
+  onSelectedCallBucketsChange?: (ids: string[]) => void
 }
 
 type SortField = "employee" | "date" | "positive" | "qualified" | "id" | "lds_id" | "cst_id" | "cqd_id"
@@ -86,7 +113,10 @@ export function ConversionUnqualifiedDataTable({
   excludedIds = new Set(),
   onExcludeRecords,
   callQueueDetails = [],
+  selectedCallBuckets = [],
+  onSelectedCallBucketsChange,
 }: ConversionUnqualifiedDataTableProps) {
+  const [callBucketOpen, setCallBucketOpen] = useState(false)
   const [searchQuery, setSearchQuery] = useState("")
   const [sortField, setSortField] = useState<SortField>("date")
   const [sortDirection, setSortDirection] = useState<SortDirection>("desc")
@@ -331,7 +361,7 @@ export function ConversionUnqualifiedDataTable({
             </Alert>
           </Collapsible>
 
-          {/* Search Input and Actions */}
+          {/* Search Input, Call Bucket Filter, and Actions */}
           <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
             <Input
               placeholder="Search by employee, date, call ID, lead ID, customer ID, or conversion status..."
@@ -339,6 +369,47 @@ export function ConversionUnqualifiedDataTable({
               onChange={(e) => setSearchQuery(e.target.value)}
               className="w-full"
             />
+            {onSelectedCallBucketsChange && (
+              <Popover open={callBucketOpen} onOpenChange={setCallBucketOpen}>
+                <PopoverTrigger asChild>
+                  <Button variant="outline" size="sm" className="h-9 shrink-0 justify-between font-normal min-w-[160px]">
+                    <span className="truncate text-left flex-1">{formatCallBucketSelectionText(selectedCallBuckets, callQueueDetails)}</span>
+                    <ChevronDown className="h-4 w-4 opacity-50 shrink-0 ml-1" />
+                  </Button>
+                </PopoverTrigger>
+                <PopoverContent className="w-[220px] p-0" align="start">
+                  <div className="p-2 max-h-[300px] overflow-auto">
+                    <div className="flex items-center space-x-2 p-2 hover:bg-accent rounded-sm">
+                      {(() => {
+                        const allBucketValues = getAllCallBucketValues(callQueueDetails)
+                        const allSelected = allBucketValues.length > 0 && selectedCallBuckets.length === allBucketValues.length && allBucketValues.every((v) => selectedCallBuckets.includes(v))
+                        const allCheckboxChecked = selectedCallBuckets.length === 0 || allSelected
+                        return (
+                          <>
+                            <Checkbox checked={allCheckboxChecked} onCheckedChange={(checked) => { if (checked) onSelectedCallBucketsChange([...allBucketValues]); else onSelectedCallBucketsChange([]) }} />
+                            <label className="text-sm font-medium leading-none cursor-pointer flex-1" onClick={() => { if (allCheckboxChecked) onSelectedCallBucketsChange([]); else onSelectedCallBucketsChange([...allBucketValues]) }}>All Call Buckets</label>
+                          </>
+                        )
+                      })()}
+                    </div>
+                    <div className="flex items-center space-x-2 p-2 hover:bg-accent rounded-sm">
+                      <Checkbox checked={selectedCallBuckets.includes("none")} onCheckedChange={(c) => { if (c) onSelectedCallBucketsChange(selectedCallBuckets.includes("none") ? selectedCallBuckets : [...selectedCallBuckets, "none"]); else onSelectedCallBucketsChange(selectedCallBuckets.filter((v) => v !== "none")) }} />
+                      <label className="text-sm font-medium leading-none cursor-pointer flex-1" onClick={() => onSelectedCallBucketsChange(selectedCallBuckets.includes("none") ? selectedCallBuckets.filter((v) => v !== "none") : [...selectedCallBuckets, "none"])}>No Call Bucket</label>
+                    </div>
+                    {[...callQueueDetails].sort((a: CallQueueDetail, b: CallQueueDetail) => (a.Descr ?? "").localeCompare(b.Descr ?? "")).map((item: CallQueueDetail) => {
+                      const value = String(item.id ?? item.cqd_id)
+                      const checked = selectedCallBuckets.includes(value)
+                      return (
+                        <div key={value} className="flex items-center space-x-2 p-2 hover:bg-accent rounded-sm">
+                          <Checkbox checked={checked} onCheckedChange={(c) => { if (c) onSelectedCallBucketsChange(selectedCallBuckets.includes(value) ? selectedCallBuckets : [...selectedCallBuckets, value]); else onSelectedCallBucketsChange(selectedCallBuckets.filter((v) => v !== value)) }} />
+                          <label className="text-sm font-medium leading-none cursor-pointer flex-1" onClick={() => onSelectedCallBucketsChange(selectedCallBuckets.includes(value) ? selectedCallBuckets.filter((v) => v !== value) : [...selectedCallBuckets, value])}>{item.Descr ?? value}</label>
+                        </div>
+                      )
+                    })}
+                  </div>
+                </PopoverContent>
+              </Popover>
+            )}
             <div className="flex items-center gap-2">
               {onExcludeRecords && (
                 <ExcludeSelectedButton
