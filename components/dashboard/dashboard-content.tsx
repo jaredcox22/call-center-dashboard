@@ -211,37 +211,6 @@ const formatEmployeeSelectionText = (selectedEmployees: string[]): string => {
 }
 
 /**
- * Returns the full list of call bucket option values (none + all ids from callQueueDetails, sorted by Descr)
- */
-const getAllCallBucketValues = (callQueueDetails: { id?: number | null; cqd_id?: number | null; Descr?: string }[] = []): string[] => {
-  const sorted = [...callQueueDetails].sort((a, b) => (a.Descr ?? '').localeCompare(b.Descr ?? ''))
-  const ids = sorted.map((q) => String(q.id ?? q.cqd_id))
-  return ['none', ...ids]
-}
-
-/**
- * Formats call bucket multi-select display text
- */
-const formatCallBucketSelectionText = (
-  selectedCallBuckets: string[],
-  callQueueDetails: { id?: number | null; cqd_id?: number | null; Descr?: string }[] = []
-): string => {
-  const allValues = getAllCallBucketValues(callQueueDetails)
-  const allSelected = allValues.length > 0 && selectedCallBuckets.length === allValues.length && allValues.every((v) => selectedCallBuckets.includes(v))
-  if (selectedCallBuckets.length === 0 || allSelected) {
-    return "All Call Buckets"
-  }
-  const labels = selectedCallBuckets.map((v) => {
-    if (v === 'none') return "No Call Bucket"
-    const item = callQueueDetails.find((q) => String(q.id ?? q.cqd_id) === v)
-    return item?.Descr ?? v
-  })
-  if (labels.length === 1) return labels[0]
-  if (labels.length === 2) return `${labels[0]}, ${labels[1]}`
-  return `${labels.length} selected`
-}
-
-/**
  * Converts filter state to storage format (serializes dates)
  */
 const serializeFilterState = (
@@ -253,7 +222,8 @@ const serializeFilterState = (
   secondaryTimePeriod: string,
   secondaryConfirmedDateRange: { from: Date | undefined; to?: Date | undefined },
   secondaryConfirmedTimeRange: { startHour: number | undefined; endHour: number | undefined },
-  selectedCallBuckets: string[]
+  selectedCallBucketsQualified: string[],
+  selectedCallBucketsUnqualified: string[]
 ): FilterState => {
   return {
     selectedEmployees,
@@ -276,7 +246,8 @@ const serializeFilterState = (
       startHour: secondaryConfirmedTimeRange.startHour ?? null,
       endHour: secondaryConfirmedTimeRange.endHour ?? null,
     },
-    callBuckets: selectedCallBuckets,
+    callBucketsQualified: selectedCallBucketsQualified,
+    callBucketsUnqualified: selectedCallBucketsUnqualified,
   }
 }
 
@@ -292,13 +263,16 @@ const deserializeFilterState = (stored: FilterState): {
   secondaryTimePeriod: string
   secondaryConfirmedDateRange: { from: Date | undefined; to?: Date | undefined }
   secondaryConfirmedTimeRange: { startHour: number | undefined; endHour: number | undefined }
-  selectedCallBuckets: string[]
+  selectedCallBucketsQualified: string[]
+  selectedCallBucketsUnqualified: string[]
 } => {
-  const callBuckets = Array.isArray(stored.callBuckets)
-    ? stored.callBuckets
-    : stored.callBucket != null && stored.callBucket !== 'all'
-      ? [stored.callBucket]
-      : []
+  const legacyBuckets = Array.isArray((stored as any).callBuckets)
+    ? (stored as any).callBuckets
+    : (stored as any).callBucket != null && (stored as any).callBucket !== 'all'
+      ? [(stored as any).callBucket]
+      : null
+  const qualified = Array.isArray(stored.callBucketsQualified) ? stored.callBucketsQualified : (legacyBuckets ?? [])
+  const unqualified = Array.isArray(stored.callBucketsUnqualified) ? stored.callBucketsUnqualified : (legacyBuckets ?? [])
   return {
     selectedEmployees: stored.selectedEmployees,
     timePeriod: stored.timePeriod,
@@ -320,7 +294,8 @@ const deserializeFilterState = (stored: FilterState): {
       startHour: stored.secondaryConfirmedTimeRange.startHour ?? undefined,
       endHour: stored.secondaryConfirmedTimeRange.endHour ?? undefined,
     },
-    selectedCallBuckets: callBuckets,
+    selectedCallBucketsQualified: qualified,
+    selectedCallBucketsUnqualified: unqualified,
   }
 }
 
@@ -712,8 +687,8 @@ export function DashboardContent() {
   const router = useRouter()
   const [timePeriod, setTimePeriod] = useState("Today")
   const [selectedEmployees, setSelectedEmployees] = useState<string[]>([])
-  const [selectedCallBuckets, setSelectedCallBuckets] = useState<string[]>([])
-  const [callBucketSelectOpen, setCallBucketSelectOpen] = useState(false)
+  const [selectedCallBucketsQualified, setSelectedCallBucketsQualified] = useState<string[]>([])
+  const [selectedCallBucketsUnqualified, setSelectedCallBucketsUnqualified] = useState<string[]>([])
   const [employeeSelectOpen, setEmployeeSelectOpen] = useState(false)
   const [dashboardType, setDashboardType] = useState<"setters" | "confirmers" | "ipp">("setters")
   const [customDateRange, setCustomDateRange] = useState<{ from: Date | undefined; to?: Date | undefined }>({ 
@@ -801,7 +776,8 @@ export function DashboardContent() {
       setSecondaryTimePeriod(deserialized.secondaryTimePeriod)
       setSecondaryConfirmedDateRange(deserialized.secondaryConfirmedDateRange)
       setSecondaryConfirmedTimeRange(deserialized.secondaryConfirmedTimeRange)
-      setSelectedCallBuckets(deserialized.selectedCallBuckets ?? [])
+      setSelectedCallBucketsQualified(deserialized.selectedCallBucketsQualified ?? [])
+      setSelectedCallBucketsUnqualified(deserialized.selectedCallBucketsUnqualified ?? [])
     } else {
       // If no stored filters, ensure agents have empty selectedEmployees
       if (!isAdmin) {
@@ -861,8 +837,7 @@ export function DashboardContent() {
     selectedEmployees,
     dashboardType,
     secondaryConfirmedTimeRange,
-    excludedIdsForTransform,
-    selectedCallBuckets
+    excludedIdsForTransform
   ) : null
   
   // Auto-select dashboard tab based on available data (only for agents, and only on initial load)
@@ -957,7 +932,8 @@ export function DashboardContent() {
         secondaryTimePeriod,
         secondaryConfirmedDateRange,
         secondaryConfirmedTimeRange,
-        selectedCallBuckets
+        selectedCallBucketsQualified,
+        selectedCallBucketsUnqualified
       )
       FilterStorage.saveFilters(serialized)
     }, 500) // Debounce by 500ms
@@ -973,7 +949,8 @@ export function DashboardContent() {
     secondaryTimePeriod,
     secondaryConfirmedDateRange,
     secondaryConfirmedTimeRange,
-    selectedCallBuckets,
+    selectedCallBucketsQualified,
+    selectedCallBucketsUnqualified,
   ])
 
   const handleDateRangeOk = () => {
@@ -1059,9 +1036,8 @@ export function DashboardContent() {
     return filteredCalls
   }
 
-  // Helper function to filter calls by secondary time range, call bucket, and employees (for performance metrics)
-  const getFilteredSecondaryCalls = (calls: any[]) => {
-    // Filter by time range if provided (only when using Custom Dates)
+  // Helper to filter calls by secondary time range, optional call buckets, and employees (for performance metrics)
+  const getFilteredSecondaryCallsWithBuckets = (calls: any[], selectedBuckets: string[]) => {
     let timeFilteredCalls = calls
     if (secondaryTimePeriod === 'Custom Dates' && secondaryConfirmedTimeRange && (secondaryConfirmedTimeRange.startHour !== undefined || secondaryConfirmedTimeRange.endHour !== undefined)) {
       timeFilteredCalls = calls.filter((call: any) => {
@@ -1070,25 +1046,19 @@ export function DashboardContent() {
         return isHourInTimeRange(hour, secondaryConfirmedTimeRange.startHour, secondaryConfirmedTimeRange.endHour)
       })
     }
-    
-    // Filter by call buckets (cqd_id) - multi-select
-    if (selectedCallBuckets && selectedCallBuckets.length > 0 && !selectedCallBuckets.includes('all')) {
-      const hasNone = selectedCallBuckets.includes('none')
-      const ids = new Set(selectedCallBuckets.filter((v) => v !== 'none').map((v) => Number(v)))
+    if (selectedBuckets.length > 0 && !selectedBuckets.includes('all')) {
+      const hasNone = selectedBuckets.includes('none')
+      const ids = new Set(selectedBuckets.filter((v) => v !== 'none').map((v) => Number(v)))
       timeFilteredCalls = timeFilteredCalls.filter((c: any) => {
         const noBucket = !c.cqd_id || c.cqd_id === 0
         if (noBucket) return hasNone
         return ids.has(Number(c.cqd_id))
       })
     }
-    
-    // Filter by employee if employees are selected
-    let filteredCalls = timeFilteredCalls
     if (selectedEmployees.length > 0) {
-      filteredCalls = timeFilteredCalls.filter((call: any) => selectedEmployees.includes(call.employee))
+      timeFilteredCalls = timeFilteredCalls.filter((call: any) => selectedEmployees.includes(call.employee))
     }
-    
-    return filteredCalls
+    return timeFilteredCalls
   }
 
   // Filter all calls for connection and dials per hour data tables
@@ -1143,18 +1113,12 @@ export function DashboardContent() {
     }))
   })() : []
 
-  // Filter pitched calls for performance metrics tables (using secondary date range)
-  const filteredSecondaryPitchedCalls = rawData ? (() => {
+  // Filter pitched calls for Conversion % (Qualified) — secondary date range + qualified call bucket filter
+  const filteredSecondaryPitchedCallsForQualified = rawData ? (() => {
     if (dashboardType !== 'setters') return []
-    
-    const callsKey = 'secondarySettersCalls'
-    const allCalls = rawData[callsKey] || []
-    const filteredCalls = getFilteredSecondaryCalls(allCalls)
-    
-    // Filter to only pitched calls (pitched === 1)
+    const allCalls = rawData.secondarySettersCalls || []
+    const filteredCalls = getFilteredSecondaryCallsWithBuckets(allCalls, selectedCallBucketsQualified)
     const pitchedCalls = filteredCalls.filter((call: any) => call.pitched === 1)
-    
-    // Transform to ConversionDataTable format
     return pitchedCalls.map((call: any) => ({
       employee: call.employee || '',
       date: call.date || null,
@@ -1167,6 +1131,37 @@ export function DashboardContent() {
       cqd_id: call.cqd_id ?? null,
     }))
   })() : []
+
+  // Filter pitched calls for Conversion % (Un-Qualified) — secondary date range + unqualified call bucket filter
+  const filteredSecondaryPitchedCallsForUnqualified = rawData ? (() => {
+    if (dashboardType !== 'setters') return []
+    const allCalls = rawData.secondarySettersCalls || []
+    const filteredCalls = getFilteredSecondaryCallsWithBuckets(allCalls, selectedCallBucketsUnqualified)
+    const pitchedCalls = filteredCalls.filter((call: any) => call.pitched === 1)
+    return pitchedCalls.map((call: any) => ({
+      employee: call.employee || '',
+      date: call.date || null,
+      pitched: call.pitched || 0,
+      positive: call.positive || 0,
+      qualified: call.qualified ?? null,
+      id: call.id ?? null,
+      lds_id: call.lds_id ?? null,
+      cst_id: call.cst_id ?? null,
+      cqd_id: call.cqd_id ?? null,
+    }))
+  })() : []
+
+  // Conversion % (Qualified) and (Un-Qualified) metric values from bucket-filtered pitched calls
+  const conversionQualifiedMetricValue = (() => {
+    const qualified = filteredSecondaryPitchedCallsForQualified.filter((c: any) => c.qualified === true)
+    const conversions = qualified.filter((c: any) => c.positive === 1).length
+    return qualified.length > 0 ? Math.round((conversions / qualified.length) * 100) : 0
+  })()
+  const conversionUnqualifiedMetricValue = (() => {
+    const unqualified = filteredSecondaryPitchedCallsForUnqualified.filter((c: any) => c.qualified === false)
+    const conversions = unqualified.filter((c: any) => c.positive === 1).length
+    return unqualified.length > 0 ? Math.round((conversions / unqualified.length) * 100) : 0
+  })()
 
   // Filter appointments for gross issue data table using secondary date range
   // Unfiltered appointments for GrossIssueDataTable (so it can show all employees in filter)
@@ -1217,8 +1212,8 @@ export function DashboardContent() {
     pitch: new Set<string>(filteredConnectedCalls.filter((r: any) => r.id != null).map((r: any) => String(r.id))),
     conversion: new Set<string>(filteredPitchedCalls.filter((r: any) => r.id != null).map((r: any) => String(r.id))),
     dialsPerHour: new Set<string>(dialsPerHourTableData.filter((r: any) => r.id != null).map((r: any) => String(r.id))),
-    conversionQualified: new Set<string>(filteredSecondaryPitchedCalls.filter((r: any) => r.id != null).map((r: any) => String(r.id))),
-    conversionUnqualified: new Set<string>(filteredSecondaryPitchedCalls.filter((r: any) => r.id != null).map((r: any) => String(r.id))),
+    conversionQualified: new Set<string>(filteredSecondaryPitchedCallsForQualified.filter((r: any) => r.id != null).map((r: any) => String(r.id))),
+    conversionUnqualified: new Set<string>(filteredSecondaryPitchedCallsForUnqualified.filter((r: any) => r.id != null).map((r: any) => String(r.id))),
     grossIssue: new Set<string>(filteredSecondaryGrossIssueAppointments.filter((r: any) => r.id != null).map((r: any) => String(r.id))),
   }
 
@@ -1903,105 +1898,6 @@ export function DashboardContent() {
                           <SelectItem value="Custom Dates">Custom Dates</SelectItem>
                         </SelectContent>
                       </Select>
-                      <Popover open={callBucketSelectOpen} onOpenChange={setCallBucketSelectOpen}>
-                        <PopoverTrigger asChild>
-                          <Button variant="outline" className="h-9 dark:border-white/10 bg-white dark:bg-transparent w-[180px] justify-between font-normal">
-                            <span className="truncate text-left flex-1">{formatCallBucketSelectionText(selectedCallBuckets, rawData?.callQueueDetails ?? [])}</span>
-                            <ChevronDown className="h-4 w-4 opacity-50 shrink-0" />
-                          </Button>
-                        </PopoverTrigger>
-                        <PopoverContent className="w-[220px] p-0" align="start">
-                          <div className="p-2 max-h-[300px] overflow-auto">
-                            {(() => {
-                              const callQueueDetailsList = rawData?.callQueueDetails ?? []
-                              const allBucketValues = getAllCallBucketValues(callQueueDetailsList)
-                              const allSelected = allBucketValues.length > 0 && selectedCallBuckets.length === allBucketValues.length && allBucketValues.every((v) => selectedCallBuckets.includes(v))
-                              const allCheckboxChecked = selectedCallBuckets.length === 0 || allSelected
-                              return (
-                            <div className="flex items-center space-x-2 p-2 hover:bg-accent rounded-sm">
-                              <Checkbox
-                                checked={allCheckboxChecked}
-                                onCheckedChange={(checked) => {
-                                  if (checked) {
-                                    setSelectedCallBuckets([...allBucketValues])
-                                  } else {
-                                    setSelectedCallBuckets([])
-                                  }
-                                }}
-                              />
-                              <label
-                                className="text-sm font-medium leading-none cursor-pointer flex-1"
-                                onClick={() => {
-                                  if (allCheckboxChecked) {
-                                    setSelectedCallBuckets([])
-                                  } else {
-                                    setSelectedCallBuckets([...allBucketValues])
-                                  }
-                                }}
-                              >
-                                All Call Buckets
-                              </label>
-                            </div>
-                              )
-                            })()}
-                            <div className="flex items-center space-x-2 p-2 hover:bg-accent rounded-sm">
-                              <Checkbox
-                                checked={selectedCallBuckets.includes('none')}
-                                onCheckedChange={(checked) => {
-                                  if (checked) {
-                                    setSelectedCallBuckets((prev) => (prev.includes('none') ? prev : [...prev, 'none']))
-                                  } else {
-                                    setSelectedCallBuckets((prev) => prev.filter((v) => v !== 'none'))
-                                  }
-                                }}
-                              />
-                              <label
-                                className="text-sm font-medium leading-none cursor-pointer flex-1"
-                                onClick={() => {
-                                  setSelectedCallBuckets((prev) =>
-                                    prev.includes('none') ? prev.filter((v) => v !== 'none') : [...prev, 'none']
-                                  )
-                                }}
-                              >
-                                No Call Bucket
-                              </label>
-                            </div>
-                            {[...(rawData?.callQueueDetails ?? [])]
-                              .sort((a: any, b: any) => (a.Descr ?? '').localeCompare(b.Descr ?? ''))
-                              .map((item: any) => {
-                              const value = String(item.id ?? item.cqd_id)
-                              const checked = selectedCallBuckets.includes(value)
-                              return (
-                                <div
-                                  key={value}
-                                  className="flex items-center space-x-2 p-2 hover:bg-accent rounded-sm"
-                                >
-                                  <Checkbox
-                                    checked={checked}
-                                    onCheckedChange={(c) => {
-                                      if (c) {
-                                        setSelectedCallBuckets((prev) => (prev.includes(value) ? prev : [...prev, value]))
-                                      } else {
-                                        setSelectedCallBuckets((prev) => prev.filter((v) => v !== value))
-                                      }
-                                    }}
-                                  />
-                                  <label
-                                    className="text-sm font-medium leading-none cursor-pointer flex-1"
-                                    onClick={() => {
-                                      setSelectedCallBuckets((prev) =>
-                                        prev.includes(value) ? prev.filter((v) => v !== value) : [...prev, value]
-                                      )
-                                    }}
-                                  >
-                                    {item.Descr ?? value}
-                                  </label>
-                                </div>
-                              )
-                            })}
-                          </div>
-                        </PopoverContent>
-                      </Popover>
                       {secondaryTimePeriod === "Custom Dates" && (
                         <Popover open={secondaryDatePickerOpen} onOpenChange={setSecondaryDatePickerOpen}>
                           <PopoverTrigger asChild>
@@ -2269,10 +2165,10 @@ export function DashboardContent() {
                       />
                       <CircularGauge
                         title="Conversion % (Qualified)"
-                        value={secondaryData.settersMetrics.conversionQualified}
+                        value={conversionQualifiedMetricValue}
                         max={100}
                         target={85}
-                        color={getGaugeColor(secondaryData.settersMetrics.conversionQualified, [64, 74, 84, 94])}
+                        color={getGaugeColor(conversionQualifiedMetricValue, [64, 74, 84, 94])}
                         unit="%"
                         size="small"
                         ranges={[
@@ -2288,10 +2184,10 @@ export function DashboardContent() {
                       />
                       <CircularGauge
                         title="Conversion % (Un-Qualified)"
-                        value={secondaryData.settersMetrics.conversionUnqualified}
+                        value={conversionUnqualifiedMetricValue}
                         max={100}
                         target={18}
-                        color={getGaugeColor(secondaryData.settersMetrics.conversionUnqualified, [10, 13, 17, 20])}
+                        color={getGaugeColor(conversionUnqualifiedMetricValue, [10, 13, 17, 20])}
                         unit="%"
                         size="small"
                         ranges={[
@@ -2514,20 +2410,24 @@ export function DashboardContent() {
             onExcludeRecords={isAdmin ? ((ids) => excludeRecords("dialsPerHour", ids)) : undefined}
           />
           <ConversionQualifiedDataTable
-            data={filteredSecondaryPitchedCalls}
+            data={filteredSecondaryPitchedCallsForQualified}
             open={conversionQualifiedTableOpen}
             onOpenChange={setConversionQualifiedTableOpen}
             excludedIds={getExcludedIdsForTable("conversionQualified")}
             onExcludeRecords={isAdmin ? ((ids) => excludeRecords("conversionQualified", ids)) : undefined}
             callQueueDetails={rawData?.callQueueDetails ?? []}
+            selectedCallBuckets={selectedCallBucketsQualified}
+            onSelectedCallBucketsChange={setSelectedCallBucketsQualified}
           />
           <ConversionUnqualifiedDataTable
-            data={filteredSecondaryPitchedCalls}
+            data={filteredSecondaryPitchedCallsForUnqualified}
             open={conversionUnqualifiedTableOpen}
             onOpenChange={setConversionUnqualifiedTableOpen}
             excludedIds={getExcludedIdsForTable("conversionUnqualified")}
             onExcludeRecords={isAdmin ? ((ids) => excludeRecords("conversionUnqualified", ids)) : undefined}
             callQueueDetails={rawData?.callQueueDetails ?? []}
+            selectedCallBuckets={selectedCallBucketsUnqualified}
+            onSelectedCallBucketsChange={setSelectedCallBucketsUnqualified}
           />
           <GrossIssueDataTable
             data={allSecondaryGrossIssueAppointments}
