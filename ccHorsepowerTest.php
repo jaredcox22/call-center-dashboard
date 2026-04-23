@@ -1481,6 +1481,9 @@ $holidays = [
         }
     }
     
+    $excludedStlSubsourceIds = [218];
+    $excludedStlSubsourceSql = implode(',', array_map('intval', $excludedStlSubsourceIds));
+
     $query = "SELECT
                 lds_Leads.id as 'leadId',
                 lds_Leads.cst_id,
@@ -1530,6 +1533,7 @@ $holidays = [
                         AND ResultCode NOT IN ('*ND', 'ccND', 'NDDNC', 'NDLB', 'NDTR')
                     ORDER BY CallDate ASC
                 ) BETWEEN '$start' AND '$end'
+                AND lds_Leads.srs_id NOT IN ($excludedStlSubsourceSql)
     ";
 
     $rtdData = curlCall("$endpoint/lp/customReport.php?rptSQL=" . urlencode($query));
@@ -1546,6 +1550,11 @@ $holidays = [
     }
     
     foreach($rtdData as $response){
+        // Exclude records for blocked STL subsources (e.g. Radio Giveaways)
+        if(isset($response['srs_id']) && in_array(intval($response['srs_id']), $excludedStlSubsourceIds, true)){
+            continue;
+        }
+
         // Exclude records matching srs_id == 6 exclusion criteria (matching getData.php logic)
         if(isset($response['srs_id']) && $response['srs_id'] == 6 && 
            isset($response['DateEntered']) && 
