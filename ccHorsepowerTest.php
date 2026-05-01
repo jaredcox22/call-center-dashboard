@@ -1455,7 +1455,7 @@ $holidays = [
         $secondarySettersAppointments = [];
         if(!empty($secondarySetterLPEmployeeIds)){
             $secondarySetterLPEmployeeIdsList = implode(',', $secondarySetterLPEmployeeIds);
-            $secondarySettersAppointmentsQuery = "SELECT app_Appointments.id, app_Appointments.lds_id, app_Appointments.cst_id, app_Appointments.ApptDate, app_Appointments.Dsp_ID, app_Appointments.SetBy, app_Appointments.ApptSet, app_Appointments.Issued, app_Appointments.NetIssued, emp_Employees.FirstName, emp_Employees.LastName FROM app_Appointments LEFT JOIN emp_Employees ON app_Appointments.SetBy = emp_Employees.id WHERE app_Appointments.ApptDate BETWEEN '$secondaryStart' AND '$secondaryEnd' AND emp_Employees.Dialer = '1' AND Dsp_ID NOT IN ('Set') AND ApptSet = '1' AND app_Appointments.SetBy IN ($secondarySetterLPEmployeeIdsList) ORDER BY app_Appointments.id DESC";
+            $secondarySettersAppointmentsQuery = "SELECT app_Appointments.id, app_Appointments.lds_id, app_Appointments.cst_id, app_Appointments.ApptDate, app_Appointments.Dsp_ID, app_Appointments.SetBy, app_Appointments.ApptSet, app_Appointments.Issued, app_Appointments.NetIssued, emp_Employees.FirstName, emp_Employees.LastName FROM app_Appointments LEFT JOIN emp_Employees ON app_Appointments.SetBy = emp_Employees.id WHERE app_Appointments.ApptDate BETWEEN '$secondaryStart' AND '$secondaryEnd' AND CAST(app_Appointments.ApptDate AS date) <= CAST(GETDATE() AS date) AND emp_Employees.Dialer = '1' AND ApptSet = '1' AND app_Appointments.SetBy IN ($secondarySetterLPEmployeeIdsList) ORDER BY app_Appointments.id DESC";
             $secondarySettersAppointments = curlCall("$endpoint/lp/customReport.php?rptSQL=" . urlencode($secondarySettersAppointmentsQuery));
         }
         
