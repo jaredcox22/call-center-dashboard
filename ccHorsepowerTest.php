@@ -44,11 +44,17 @@ $holidays = [
         $responseData['confirmersScorecards'] = [];
         $responseData['settersAppointments'] = [];
         $responseData['secondarySettersAppointments'] = [];
+        $responseData['gspCalls'] = [];
+        $responseData['gspHours'] = [];
+        $responseData['secondaryGspCalls'] = [];
+        $responseData['secondaryGspHours'] = [];
     }else{
         $responseData = [
             'settersCalls' => [],
             'confirmersCalls' => [],
             'ippCalls' => [],
+            'gspCalls' => [],
+            'gspHours' => [],
             'hours' => [],
         ];
     }
@@ -199,6 +205,11 @@ $holidays = [
             break;
         }
     }
+
+    // GSP cold-call list IDs (cls_Calls.ccl_id) — shared by primary and secondary queries
+    $gspCclIds = [10, 11, 18, 19];
+    $gspCclSqlIn = implode(',', array_map('intval', $gspCclIds));
+    $excludeGspCclSql = " AND (cls_Calls.ccl_id IS NULL OR cls_Calls.ccl_id NOT IN ($gspCclSqlIn))";
 
     if(array_key_exists('test', $_GET)){
 
@@ -391,25 +402,28 @@ $holidays = [
         $settersCalls = [];
         $confirmersCalls = [];
         $ippCalls = [];
+        $gspCalls = [];
         
         // Fetch setters calls - only for employees clocked into Setter operational unit
         if(!empty($settersDeputyIDs)){
             $settersDeputyIdsList = implode(',', $settersDeputyIDs);
-            $settersCallsQuery = "SELECT emp_user_12, emp_id, LastName, cls_Calls.id as id, FirstName, CallDate, ResultCode, cty_id, Connected, Pitched, Positive, qualified, lds_Leads.ApptSet, lds_Leads.Issued, cls_Calls.lds_id, cls_Calls.cst_id, cls_Calls.cqd_id FROM cls_Calls LEFT JOIN clr_CallResults ON ResultCode = clr_CallResults.id LEFT JOIN emp_Employees ON emp_id = emp_Employees.id LEFT JOIN lds_Leads ON cls_Calls.lds_id = lds_Leads.id LEFT JOIN srs_SourceSubs ON lds_Leads.srs_id = srs_SourceSubs.id WHERE CallDate BETWEEN '$start' AND '$end' AND ResultCode NOT IN ('*ND', 'TXT') AND Dialer = 'True' AND emp_user_12 IN ($settersDeputyIdsList) AND cty_id NOT IN ('C', 'IPP')";
+            $settersCallsQuery = "SELECT emp_user_12, emp_id, LastName, cls_Calls.id as id, FirstName, CallDate, ResultCode, cty_id, Connected, Pitched, Positive, qualified, lds_Leads.ApptSet, lds_Leads.Issued, cls_Calls.lds_id, cls_Calls.cst_id, cls_Calls.cqd_id FROM cls_Calls LEFT JOIN clr_CallResults ON ResultCode = clr_CallResults.id LEFT JOIN emp_Employees ON emp_id = emp_Employees.id LEFT JOIN lds_Leads ON cls_Calls.lds_id = lds_Leads.id LEFT JOIN srs_SourceSubs ON lds_Leads.srs_id = srs_SourceSubs.id WHERE CallDate BETWEEN '$start' AND '$end' AND ResultCode NOT IN ('*ND', 'TXT') AND Dialer = 'True' AND emp_user_12 IN ($settersDeputyIdsList) AND cty_id NOT IN ('C', 'IPP')$excludeGspCclSql";
             $settersCalls = curlCall("$endpoint/lp/customReport.php?rptSQL=" . urlencode($settersCallsQuery));
+            $gspCallsQuery = "SELECT emp_user_12, emp_id, LastName, cls_Calls.id as id, FirstName, CallDate, ResultCode, cty_id, Connected, Pitched, Positive, qualified, lds_Leads.ApptSet, lds_Leads.Issued, cls_Calls.lds_id, cls_Calls.cst_id, cls_Calls.cqd_id FROM cls_Calls LEFT JOIN clr_CallResults ON ResultCode = clr_CallResults.id LEFT JOIN emp_Employees ON emp_id = emp_Employees.id LEFT JOIN lds_Leads ON cls_Calls.lds_id = lds_Leads.id LEFT JOIN srs_SourceSubs ON lds_Leads.srs_id = srs_SourceSubs.id WHERE CallDate BETWEEN '$start' AND '$end' AND ResultCode NOT IN ('*ND', 'TXT') AND Dialer = 'True' AND emp_user_12 IN ($settersDeputyIdsList) AND cty_id NOT IN ('C', 'IPP') AND cls_Calls.ccl_id IN ($gspCclSqlIn)";
+            $gspCalls = curlCall("$endpoint/lp/customReport.php?rptSQL=" . urlencode($gspCallsQuery));
         }
         
         // Fetch confirmers calls - only for employees clocked into Confirmer operational unit
         if(!empty($confirmersDeputyIDs)){
             $confirmersDeputyIdsList = implode(',', $confirmersDeputyIDs);
-            $confirmersCallsQuery = "SELECT emp_user_12, emp_id, LastName, cls_Calls.id as id, FirstName, CallDate, ResultCode, cty_id, Connected, Pitched, Positive, qualified, lds_Leads.ApptSet, lds_Leads.Issued, cls_Calls.cqd_id FROM cls_Calls LEFT JOIN clr_CallResults ON ResultCode = clr_CallResults.id LEFT JOIN emp_Employees ON emp_id = emp_Employees.id LEFT JOIN lds_Leads ON cls_Calls.lds_id = lds_Leads.id LEFT JOIN srs_SourceSubs ON lds_Leads.srs_id = srs_SourceSubs.id WHERE CallDate BETWEEN '$start' AND '$end' AND ResultCode NOT IN ('*ND', 'TXT') AND Dialer = 'True' AND emp_user_12 IN ($confirmersDeputyIdsList) AND cty_id = 'C'";
+            $confirmersCallsQuery = "SELECT emp_user_12, emp_id, LastName, cls_Calls.id as id, FirstName, CallDate, ResultCode, cty_id, Connected, Pitched, Positive, qualified, lds_Leads.ApptSet, lds_Leads.Issued, cls_Calls.cqd_id FROM cls_Calls LEFT JOIN clr_CallResults ON ResultCode = clr_CallResults.id LEFT JOIN emp_Employees ON emp_id = emp_Employees.id LEFT JOIN lds_Leads ON cls_Calls.lds_id = lds_Leads.id LEFT JOIN srs_SourceSubs ON lds_Leads.srs_id = srs_SourceSubs.id WHERE CallDate BETWEEN '$start' AND '$end' AND ResultCode NOT IN ('*ND', 'TXT') AND Dialer = 'True' AND emp_user_12 IN ($confirmersDeputyIdsList) AND cty_id = 'C'$excludeGspCclSql";
             $confirmersCalls = curlCall("$endpoint/lp/customReport.php?rptSQL=" . urlencode($confirmersCallsQuery));
         }
         
         // Fetch IPP calls - only for employees clocked into IPP operational unit
         if(!empty($ippDeputyIDs)){
             $ippDeputyIdsList = implode(',', $ippDeputyIDs);
-            $ippCallsQuery = "SELECT emp_user_12, emp_id, LastName, cls_Calls.id as id, FirstName, CallDate, ResultCode, cty_id, Connected, Pitched, Positive, qualified, lds_Leads.ApptSet, lds_Leads.Issued, cls_Calls.cqd_id FROM cls_Calls LEFT JOIN clr_CallResults ON ResultCode = clr_CallResults.id LEFT JOIN emp_Employees ON emp_id = emp_Employees.id LEFT JOIN lds_Leads ON cls_Calls.lds_id = lds_Leads.id LEFT JOIN srs_SourceSubs ON lds_Leads.srs_id = srs_SourceSubs.id WHERE CallDate BETWEEN '$start' AND '$end' AND ResultCode NOT IN ('*ND', 'TXT') AND Dialer = 'True' AND emp_user_12 IN ($ippDeputyIdsList) AND cty_id = 'IPP'";
+            $ippCallsQuery = "SELECT emp_user_12, emp_id, LastName, cls_Calls.id as id, FirstName, CallDate, ResultCode, cty_id, Connected, Pitched, Positive, qualified, lds_Leads.ApptSet, lds_Leads.Issued, cls_Calls.cqd_id FROM cls_Calls LEFT JOIN clr_CallResults ON ResultCode = clr_CallResults.id LEFT JOIN emp_Employees ON emp_id = emp_Employees.id LEFT JOIN lds_Leads ON cls_Calls.lds_id = lds_Leads.id LEFT JOIN srs_SourceSubs ON lds_Leads.srs_id = srs_SourceSubs.id WHERE CallDate BETWEEN '$start' AND '$end' AND ResultCode NOT IN ('*ND', 'TXT') AND Dialer = 'True' AND emp_user_12 IN ($ippDeputyIdsList) AND cty_id = 'IPP'$excludeGspCclSql";
             $ippCalls = curlCall("$endpoint/lp/customReport.php?rptSQL=" . urlencode($ippCallsQuery));
         }
 
@@ -512,6 +526,37 @@ $holidays = [
                 'qualified' => ($call['qualified'] == 1 ? true : false),
                 'ApptSet' => $call['ApptSet'] ?? null,
                 'Issued' => $call['Issued'] ?? null,
+                'cqd_id' => $call['cqd_id'] ?? null,
+            ];
+        }
+
+        // Process GSP calls (setter deputies + GSP cold-call list IDs only)
+        foreach($gspCalls as $call){
+            $deputyID = $call['emp_user_12'];
+            if(!array_key_exists(intval($deputyID), $timesheetEmployees)){
+                continue;
+            }
+            $employeeName = $call['FirstName'] . " " . $call['LastName'];
+            $employeeID = intval($deputyID);
+            $timesheetEmployees[$employeeID]['employee'] = $employeeName;
+            if(array_key_exists($employeeID, $settersTimesheetEmployees)){
+                $settersTimesheetEmployees[$employeeID]['employee'] = $employeeName;
+            }
+            $employeeType[$employeeID] = 'setter';
+            $responseData['gspCalls'][] = [
+                'id' => $call['id'],
+                'employee' => $employeeName,
+                'date' => $call['CallDate'],
+                'result' => $call['ResultCode'],
+                'cty_id' => $call['cty_id'],
+                'connected' => $call['Connected'],
+                'pitched' => $call['Pitched'],
+                'positive' => $call['Positive'],
+                'qualified' => ($call['qualified'] == 1 ? true : false),
+                'ApptSet' => $call['ApptSet'] ?? null,
+                'Issued' => $call['Issued'] ?? null,
+                'lds_id' => $call['lds_id'] ?? null,
+                'cst_id' => $call['cst_id'] ?? null,
                 'cqd_id' => $call['cqd_id'] ?? null,
             ];
         }
@@ -621,6 +666,7 @@ $holidays = [
         $responseData['settersHours'] = array_values($settersTimesheetEmployees);
         $responseData['confirmersHours'] = array_values($confirmersTimesheetEmployees);
         $responseData['IPPHours'] = array_values($ippTimesheetEmployees);
+        $responseData['gspHours'] = [];
         
         // DEBUG: Analyze final hours array (now using setter-specific hours)
         $settersInHours = 0;
@@ -975,6 +1021,8 @@ $holidays = [
     $responseData['secondarySettersCalls'] = [];
     $responseData['secondaryConfirmersCalls'] = [];
     $responseData['secondaryIPPCalls'] = [];
+    $responseData['secondaryGspCalls'] = [];
+    $responseData['secondaryGspHours'] = [];
     $responseData['secondarySettersHours'] = [];
     $responseData['secondaryConfirmersHours'] = [];
     $responseData['secondaryIPPHours'] = [];
@@ -1138,25 +1186,28 @@ $holidays = [
         $secondarySettersCalls = [];
         $secondaryConfirmersCalls = [];
         $secondaryIPPCalls = [];
+        $secondaryGspCalls = [];
         
         // Fetch secondary setters calls - only for employees clocked into Setter operational unit
         if(!empty($secondarySettersDeputyIDs)){
             $secondarySettersDeputyIdsList = implode(',', $secondarySettersDeputyIDs);
-            $secondarySettersCallsQuery = "SELECT emp_user_12, emp_id, LastName, cls_Calls.id as id, FirstName, CallDate, ResultCode, cty_id, Connected, Pitched, Positive, qualified, lds_Leads.ApptSet, lds_Leads.Issued, cls_Calls.lds_id, cls_Calls.cst_id, cls_Calls.cqd_id FROM cls_Calls LEFT JOIN clr_CallResults ON ResultCode = clr_CallResults.id LEFT JOIN emp_Employees ON emp_id = emp_Employees.id LEFT JOIN lds_Leads ON cls_Calls.lds_id = lds_Leads.id LEFT JOIN srs_SourceSubs ON lds_Leads.srs_id = srs_SourceSubs.id WHERE CallDate BETWEEN '$secondaryStart' AND '$secondaryEnd' AND ResultCode NOT IN ('*ND', 'TXT') AND Dialer = 'True' AND emp_user_12 IN ($secondarySettersDeputyIdsList) AND cty_id NOT IN ('C', 'IPP')";
+            $secondarySettersCallsQuery = "SELECT emp_user_12, emp_id, LastName, cls_Calls.id as id, FirstName, CallDate, ResultCode, cty_id, Connected, Pitched, Positive, qualified, lds_Leads.ApptSet, lds_Leads.Issued, cls_Calls.lds_id, cls_Calls.cst_id, cls_Calls.cqd_id FROM cls_Calls LEFT JOIN clr_CallResults ON ResultCode = clr_CallResults.id LEFT JOIN emp_Employees ON emp_id = emp_Employees.id LEFT JOIN lds_Leads ON cls_Calls.lds_id = lds_Leads.id LEFT JOIN srs_SourceSubs ON lds_Leads.srs_id = srs_SourceSubs.id WHERE CallDate BETWEEN '$secondaryStart' AND '$secondaryEnd' AND ResultCode NOT IN ('*ND', 'TXT') AND Dialer = 'True' AND emp_user_12 IN ($secondarySettersDeputyIdsList) AND cty_id NOT IN ('C', 'IPP')$excludeGspCclSql";
             $secondarySettersCalls = curlCall("$endpoint/lp/customReport.php?rptSQL=" . urlencode($secondarySettersCallsQuery));
+            $secondaryGspCallsQuery = "SELECT emp_user_12, emp_id, LastName, cls_Calls.id as id, FirstName, CallDate, ResultCode, cty_id, Connected, Pitched, Positive, qualified, lds_Leads.ApptSet, lds_Leads.Issued, cls_Calls.lds_id, cls_Calls.cst_id, cls_Calls.cqd_id FROM cls_Calls LEFT JOIN clr_CallResults ON ResultCode = clr_CallResults.id LEFT JOIN emp_Employees ON emp_id = emp_Employees.id LEFT JOIN lds_Leads ON cls_Calls.lds_id = lds_Leads.id LEFT JOIN srs_SourceSubs ON lds_Leads.srs_id = srs_SourceSubs.id WHERE CallDate BETWEEN '$secondaryStart' AND '$secondaryEnd' AND ResultCode NOT IN ('*ND', 'TXT') AND Dialer = 'True' AND emp_user_12 IN ($secondarySettersDeputyIdsList) AND cty_id NOT IN ('C', 'IPP') AND cls_Calls.ccl_id IN ($gspCclSqlIn)";
+            $secondaryGspCalls = curlCall("$endpoint/lp/customReport.php?rptSQL=" . urlencode($secondaryGspCallsQuery));
         }
         
         // Fetch secondary confirmers calls - only for employees clocked into Confirmer operational unit
         if(!empty($secondaryConfirmersDeputyIDs)){
             $secondaryConfirmersDeputyIdsList = implode(',', $secondaryConfirmersDeputyIDs);
-            $secondaryConfirmersCallsQuery = "SELECT emp_user_12, emp_id, LastName, cls_Calls.id as id, FirstName, CallDate, ResultCode, cty_id, Connected, Pitched, Positive, qualified, lds_Leads.ApptSet, lds_Leads.Issued, cls_Calls.cqd_id FROM cls_Calls LEFT JOIN clr_CallResults ON ResultCode = clr_CallResults.id LEFT JOIN emp_Employees ON emp_id = emp_Employees.id LEFT JOIN lds_Leads ON cls_Calls.lds_id = lds_Leads.id LEFT JOIN srs_SourceSubs ON lds_Leads.srs_id = srs_SourceSubs.id WHERE CallDate BETWEEN '$secondaryStart' AND '$secondaryEnd' AND ResultCode NOT IN ('*ND', 'TXT') AND Dialer = 'True' AND emp_user_12 IN ($secondaryConfirmersDeputyIdsList) AND cty_id = 'C'";
+            $secondaryConfirmersCallsQuery = "SELECT emp_user_12, emp_id, LastName, cls_Calls.id as id, FirstName, CallDate, ResultCode, cty_id, Connected, Pitched, Positive, qualified, lds_Leads.ApptSet, lds_Leads.Issued, cls_Calls.cqd_id FROM cls_Calls LEFT JOIN clr_CallResults ON ResultCode = clr_CallResults.id LEFT JOIN emp_Employees ON emp_id = emp_Employees.id LEFT JOIN lds_Leads ON cls_Calls.lds_id = lds_Leads.id LEFT JOIN srs_SourceSubs ON lds_Leads.srs_id = srs_SourceSubs.id WHERE CallDate BETWEEN '$secondaryStart' AND '$secondaryEnd' AND ResultCode NOT IN ('*ND', 'TXT') AND Dialer = 'True' AND emp_user_12 IN ($secondaryConfirmersDeputyIdsList) AND cty_id = 'C'$excludeGspCclSql";
             $secondaryConfirmersCalls = curlCall("$endpoint/lp/customReport.php?rptSQL=" . urlencode($secondaryConfirmersCallsQuery));
         }
         
         // Fetch secondary IPP calls - only for employees clocked into IPP operational unit
         if(!empty($secondaryIPPDeputyIDs)){
             $secondaryIPPDeputyIdsList = implode(',', $secondaryIPPDeputyIDs);
-            $secondaryIPPCallsQuery = "SELECT emp_user_12, emp_id, LastName, cls_Calls.id as id, FirstName, CallDate, ResultCode, cty_id, Connected, Pitched, Positive, qualified, lds_Leads.ApptSet, lds_Leads.Issued, cls_Calls.cqd_id FROM cls_Calls LEFT JOIN clr_CallResults ON ResultCode = clr_CallResults.id LEFT JOIN emp_Employees ON emp_id = emp_Employees.id LEFT JOIN lds_Leads ON cls_Calls.lds_id = lds_Leads.id LEFT JOIN srs_SourceSubs ON lds_Leads.srs_id = srs_SourceSubs.id WHERE CallDate BETWEEN '$secondaryStart' AND '$secondaryEnd' AND ResultCode NOT IN ('*ND', 'TXT') AND Dialer = 'True' AND emp_user_12 IN ($secondaryIPPDeputyIdsList) AND cty_id = 'IPP'";
+            $secondaryIPPCallsQuery = "SELECT emp_user_12, emp_id, LastName, cls_Calls.id as id, FirstName, CallDate, ResultCode, cty_id, Connected, Pitched, Positive, qualified, lds_Leads.ApptSet, lds_Leads.Issued, cls_Calls.cqd_id FROM cls_Calls LEFT JOIN clr_CallResults ON ResultCode = clr_CallResults.id LEFT JOIN emp_Employees ON emp_id = emp_Employees.id LEFT JOIN lds_Leads ON cls_Calls.lds_id = lds_Leads.id LEFT JOIN srs_SourceSubs ON lds_Leads.srs_id = srs_SourceSubs.id WHERE CallDate BETWEEN '$secondaryStart' AND '$secondaryEnd' AND ResultCode NOT IN ('*ND', 'TXT') AND Dialer = 'True' AND emp_user_12 IN ($secondaryIPPDeputyIdsList) AND cty_id = 'IPP'$excludeGspCclSql";
             $secondaryIPPCalls = curlCall("$endpoint/lp/customReport.php?rptSQL=" . urlencode($secondaryIPPCallsQuery));
         }
 
@@ -1245,6 +1296,34 @@ $holidays = [
                 'cqd_id' => $call['cqd_id'] ?? null,
             ];
         }
+
+        foreach($secondaryGspCalls as $call){
+            if(!array_key_exists(intval($call['emp_user_12']), $secondaryTimesheetEmployees)){
+                continue;
+            }
+            $employeeName = $call['FirstName'] . " " . $call['LastName'];
+            $employeeID = intval($call['emp_user_12']);
+            $secondaryTimesheetEmployees[$employeeID]['employee'] = $employeeName;
+            if(array_key_exists($employeeID, $secondarySettersTimesheetEmployees)){
+                $secondarySettersTimesheetEmployees[$employeeID]['employee'] = $employeeName;
+            }
+            $responseData['secondaryGspCalls'][] = [
+                'id' => $call['id'],
+                'employee' => $employeeName,
+                'date' => $call['CallDate'],
+                'result' => $call['ResultCode'],
+                'cty_id' => $call['cty_id'],
+                'connected' => $call['Connected'],
+                'pitched' => $call['Pitched'],
+                'positive' => $call['Positive'],
+                'qualified' => ($call['qualified'] == 1 ? true : false),
+                'ApptSet' => $call['ApptSet'] ?? null,
+                'Issued' => $call['Issued'] ?? null,
+                'lds_id' => $call['lds_id'] ?? null,
+                'cst_id' => $call['cst_id'] ?? null,
+                'cqd_id' => $call['cqd_id'] ?? null,
+            ];
+        }
         
         // Set employee names for secondary setter hours (in case they have hours but no calls)
         foreach($secondarySettersTimesheetEmployees as $empID => $empData){
@@ -1308,6 +1387,7 @@ $holidays = [
         $responseData['secondarySettersHours'] = array_values($secondarySettersTimesheetEmployees);
         $responseData['secondaryConfirmersHours'] = array_values($secondaryConfirmersTimesheetEmployees);
         $responseData['secondaryIPPHours'] = array_values($secondaryIPPTimesheetEmployees);
+        $responseData['secondaryGspHours'] = [];
 
         // Fetch secondary scorecards
         $secondaryQueryEndDate = date('Y-m-d', strtotime($secondaryEnd . ' -1 day'));

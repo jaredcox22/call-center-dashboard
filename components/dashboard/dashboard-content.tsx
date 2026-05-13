@@ -42,6 +42,10 @@ import { FilterStorage, FilterState } from "@/lib/filter-storage"
 import useSWR from "swr"
 import { format } from "date-fns"
 
+type DashboardTab = "setters" | "confirmers" | "ipp" | "gsp"
+
+const isSetterLikeTab = (t: DashboardTab) => t === "setters" || t === "gsp"
+
 const fetcher = async (url: string) => {
   const response = await fetch(url, {
     credentials: 'include', // For CORS with credentials
@@ -216,7 +220,7 @@ const formatEmployeeSelectionText = (selectedEmployees: string[]): string => {
 const serializeFilterState = (
   selectedEmployees: string[],
   timePeriod: string,
-  dashboardType: "setters" | "confirmers" | "ipp",
+  dashboardType: DashboardTab,
   confirmedDateRange: { from: Date | undefined; to?: Date | undefined },
   confirmedTimeRange: { startHour: number | undefined; endHour: number | undefined },
   secondaryTimePeriod: string,
@@ -257,7 +261,7 @@ const serializeFilterState = (
 const deserializeFilterState = (stored: FilterState): {
   selectedEmployees: string[]
   timePeriod: string
-  dashboardType: "setters" | "confirmers" | "ipp"
+  dashboardType: DashboardTab
   confirmedDateRange: { from: Date | undefined; to?: Date | undefined }
   confirmedTimeRange: { startHour: number | undefined; endHour: number | undefined }
   secondaryTimePeriod: string
@@ -273,10 +277,14 @@ const deserializeFilterState = (stored: FilterState): {
       : null
   const qualified = Array.isArray(stored.callBucketsQualified) ? stored.callBucketsQualified : (legacyBuckets ?? [])
   const unqualified = Array.isArray(stored.callBucketsUnqualified) ? stored.callBucketsUnqualified : (legacyBuckets ?? [])
+  const validDashboardTabs: DashboardTab[] = ['setters', 'confirmers', 'ipp', 'gsp']
+  const dashboardType: DashboardTab = validDashboardTabs.includes(stored.dashboardType as DashboardTab)
+    ? (stored.dashboardType as DashboardTab)
+    : 'setters'
   return {
     selectedEmployees: stored.selectedEmployees,
     timePeriod: stored.timePeriod,
-    dashboardType: stored.dashboardType,
+    dashboardType,
     confirmedDateRange: {
       from: stored.confirmedDateRange.from ? new Date(stored.confirmedDateRange.from) : undefined,
       to: stored.confirmedDateRange.to ? new Date(stored.confirmedDateRange.to) : undefined,
@@ -353,13 +361,20 @@ interface ExcludedIdsByTable {
 const transformApiData = (
   apiData: any, 
   selectedEmployees: string[], 
-  dashboardType: 'setters' | 'confirmers' | 'ipp',
+  dashboardType: DashboardTab,
   timeRange?: { startHour: number | undefined; endHour: number | undefined },
   excludedIds?: ExcludedIdsByTable,
   selectedCallBuckets?: string[]
 ) => {
   // Use the appropriate calls array based on dashboard type
-  const callsKey = dashboardType === 'setters' ? 'settersCalls' : dashboardType === 'confirmers' ? 'confirmersCalls' : 'ippCalls'
+  const callsKey =
+    dashboardType === 'setters'
+      ? 'settersCalls'
+      : dashboardType === 'gsp'
+        ? 'gspCalls'
+        : dashboardType === 'confirmers'
+          ? 'confirmersCalls'
+          : 'ippCalls'
   let allCalls = apiData[callsKey] || []
   
   // Filter out excluded records from calls (using call id)
@@ -381,11 +396,23 @@ const transformApiData = (
   }
   
   // Get scorecards based on dashboard type
-  const scorecardsKey = dashboardType === 'setters' ? 'settersScorecards' : dashboardType === 'confirmers' ? 'confirmersScorecards' : 'settersScorecards' // IPP doesn't have scorecards yet
+  const scorecardsKey =
+    dashboardType === 'setters' || dashboardType === 'gsp'
+      ? 'settersScorecards'
+      : dashboardType === 'confirmers'
+        ? 'confirmersScorecards'
+        : 'settersScorecards' // IPP doesn't have scorecards yet
   const allScorecards = apiData[scorecardsKey] || []
   
   // Get hours based on dashboard type
-  const hoursKey = dashboardType === 'setters' ? 'settersHours' : dashboardType === 'confirmers' ? 'confirmersHours' : 'IPPHours'
+  const hoursKey =
+    dashboardType === 'setters'
+      ? 'settersHours'
+      : dashboardType === 'gsp'
+        ? 'gspHours'
+        : dashboardType === 'confirmers'
+          ? 'confirmersHours'
+          : 'IPPHours'
   const allHours = apiData[hoursKey] || []
   
   // Keep team-wide STL data (checkout to dial time is a TEAM metric)
@@ -532,7 +559,7 @@ const transformApiData = (
   let totalAppointments = 0
   let totalIssuedFromAppointments = 0
   
-  if (dashboardType === 'setters') {
+  if (isSetterLikeTab(dashboardType)) {
     allAppointments = apiData.settersAppointments || []
     
     // Filter appointments by selected employees
@@ -577,7 +604,7 @@ const transformApiData = (
   const conversionQualified = totalQualified > 0 ? Math.round((totalQualifiedConversions / totalQualified) * 100) : 0
   const conversionUnqualified = totalUnqualified > 0 ? Math.round((totalUnqualifiedConversions / totalUnqualified) * 100) : 0
   // Calculate grossIssue from appointments (for setters) or calls (for confirmers)
-  const grossIssue = dashboardType === 'setters' 
+  const grossIssue = isSetterLikeTab(dashboardType) 
     ? (totalAppointments > 0 ? Math.round((totalIssuedFromAppointments / totalAppointments) * 100) : 0)
     : (totalApptSet > 0 ? Math.round((totalIssuedFromCalls / totalApptSet) * 100) : 0)
   
@@ -690,7 +717,7 @@ export function DashboardContent() {
   const [selectedCallBucketsQualified, setSelectedCallBucketsQualified] = useState<string[]>([])
   const [selectedCallBucketsUnqualified, setSelectedCallBucketsUnqualified] = useState<string[]>([])
   const [employeeSelectOpen, setEmployeeSelectOpen] = useState(false)
-  const [dashboardType, setDashboardType] = useState<"setters" | "confirmers" | "ipp">("setters")
+  const [dashboardType, setDashboardType] = useState<DashboardTab>("setters")
   const [customDateRange, setCustomDateRange] = useState<{ from: Date | undefined; to?: Date | undefined }>({ 
     from: undefined, 
     to: undefined 
@@ -824,9 +851,11 @@ export function DashboardContent() {
   const secondaryData = rawData ? transformApiData(
     {
       settersCalls: rawData.secondarySettersCalls || [],
+      gspCalls: rawData.secondaryGspCalls || [],
       confirmersCalls: rawData.secondaryConfirmersCalls || [],
       ippCalls: rawData.secondaryIPPCalls || [],
       settersHours: rawData.secondarySettersHours || [],
+      gspHours: rawData.secondaryGspHours || [],
       confirmersHours: rawData.secondaryConfirmersHours || [],
       IPPHours: rawData.secondaryIPPHours || [],
       settersScorecards: rawData.secondarySettersScorecards || [],
@@ -846,16 +875,19 @@ export function DashboardContent() {
     if (!rawData || hasAutoSelectedTab || isAdmin) return
     
     const hasSettersData = (rawData.settersCalls?.length > 0) || (rawData.settersHours?.length > 0)
+    const hasGspData = (rawData.gspCalls?.length > 0) || (rawData.gspHours?.length > 0)
     const hasConfirmersData = (rawData.confirmersCalls?.length > 0) || (rawData.confirmersHours?.length > 0)
     const hasIPPData = (rawData.ippCalls?.length > 0) || (rawData.IPPHours?.length > 0)
     
-    // Auto-select the first tab that has data
+    // Auto-select the first tab that has data (GSP last, after IPP)
     if (hasSettersData) {
       setDashboardType('setters')
     } else if (hasConfirmersData) {
       setDashboardType('confirmers')
     } else if (hasIPPData) {
       setDashboardType('ipp')
+    } else if (hasGspData) {
+      setDashboardType('gsp')
     }
     
     setHasAutoSelectedTab(true)
@@ -876,7 +908,9 @@ export function DashboardContent() {
       })
       return Array.from(uniqueEmployees).sort()
     } else {
-      const callsKey = dashboardType === 'setters' ? 'settersCalls' : 'confirmersCalls'
+      const callsKey = isSetterLikeTab(dashboardType)
+        ? (dashboardType === 'gsp' ? 'gspCalls' : 'settersCalls')
+        : 'confirmersCalls'
       const calls = rawData[callsKey] || []
       const uniqueEmployees = new Set<string>()
       calls.forEach((call: any) => {
@@ -1063,18 +1097,18 @@ export function DashboardContent() {
 
   // Filter all calls for connection and dials per hour data tables
   const filteredAllCalls = rawData ? (() => {
-    if (dashboardType !== 'setters') return []
+    if (!isSetterLikeTab(dashboardType)) return []
     
-    const callsKey = 'settersCalls'
+    const callsKey = dashboardType === 'gsp' ? 'gspCalls' : 'settersCalls'
     const allCalls = rawData[callsKey] || []
     return getFilteredCalls(allCalls)
   })() : []
 
   // Filter connected calls for pitch data table
   const filteredConnectedCalls = rawData ? (() => {
-    if (dashboardType !== 'setters') return []
+    if (!isSetterLikeTab(dashboardType)) return []
     
-    const callsKey = 'settersCalls'
+    const callsKey = dashboardType === 'gsp' ? 'gspCalls' : 'settersCalls'
     const allCalls = rawData[callsKey] || []
     const filteredCalls = getFilteredCalls(allCalls)
     
@@ -1093,9 +1127,9 @@ export function DashboardContent() {
 
   // Filter pitched calls for conversion data table
   const filteredPitchedCalls = rawData ? (() => {
-    if (dashboardType !== 'setters') return []
+    if (!isSetterLikeTab(dashboardType)) return []
     
-    const callsKey = 'settersCalls'
+    const callsKey = dashboardType === 'gsp' ? 'gspCalls' : 'settersCalls'
     const allCalls = rawData[callsKey] || []
     const filteredCalls = getFilteredCalls(allCalls)
     
@@ -1115,8 +1149,8 @@ export function DashboardContent() {
 
   // Filter pitched calls for Conversion % (Qualified) — secondary date range + qualified call bucket filter
   const filteredSecondaryPitchedCallsForQualified = rawData ? (() => {
-    if (dashboardType !== 'setters') return []
-    const allCalls = rawData.secondarySettersCalls || []
+    if (!isSetterLikeTab(dashboardType)) return []
+    const allCalls = (dashboardType === 'gsp' ? rawData.secondaryGspCalls : rawData.secondarySettersCalls) || []
     const filteredCalls = getFilteredSecondaryCallsWithBuckets(allCalls, selectedCallBucketsQualified)
     const pitchedCalls = filteredCalls.filter((call: any) => call.pitched === 1)
     return pitchedCalls.map((call: any) => ({
@@ -1134,8 +1168,8 @@ export function DashboardContent() {
 
   // Filter pitched calls for Conversion % (Un-Qualified) — secondary date range + unqualified call bucket filter
   const filteredSecondaryPitchedCallsForUnqualified = rawData ? (() => {
-    if (dashboardType !== 'setters') return []
-    const allCalls = rawData.secondarySettersCalls || []
+    if (!isSetterLikeTab(dashboardType)) return []
+    const allCalls = (dashboardType === 'gsp' ? rawData.secondaryGspCalls : rawData.secondarySettersCalls) || []
     const filteredCalls = getFilteredSecondaryCallsWithBuckets(allCalls, selectedCallBucketsUnqualified)
     const pitchedCalls = filteredCalls.filter((call: any) => call.pitched === 1)
     return pitchedCalls.map((call: any) => ({
@@ -1166,7 +1200,7 @@ export function DashboardContent() {
   // Filter appointments for gross issue data table using secondary date range
   // Unfiltered appointments for GrossIssueDataTable (so it can show all employees in filter)
   const allSecondaryGrossIssueAppointments = rawData ? (() => {
-    if (dashboardType !== 'setters') return []
+    if (!isSetterLikeTab(dashboardType)) return []
     
     const appointmentsKey = 'secondarySettersAppointments'
     const allAppointments = rawData[appointmentsKey] || []
@@ -1226,9 +1260,9 @@ export function DashboardContent() {
 
   // Calculate total hours for dials per hour metric (same logic as in transformApiData)
   const totalHoursForDialsPerHour = rawData ? (() => {
-    if (dashboardType !== 'setters') return 0
+    if (!isSetterLikeTab(dashboardType) || dashboardType === 'gsp') return 0
     
-    const hoursKey = dashboardType === 'setters' ? 'settersHours' : dashboardType === 'confirmers' ? 'confirmersHours' : 'IPPHours'
+    const hoursKey = 'settersHours'
     let filteredHours = rawData[hoursKey] || []
     
     // Filter by employee if employees are selected
@@ -1296,9 +1330,11 @@ export function DashboardContent() {
   
   // Determine if there's actual data for the current dashboard type
   const hasDataForCurrentDashboard = rawData ? (() => {
-    if (dashboardType === 'setters') {
-      const calls = rawData.settersCalls || []
-      const hours = rawData.settersHours || []
+    if (isSetterLikeTab(dashboardType)) {
+      const callsKey = dashboardType === 'gsp' ? 'gspCalls' : 'settersCalls'
+      const hoursKey = dashboardType === 'gsp' ? 'gspHours' : 'settersHours'
+      const calls = rawData[callsKey] || []
+      const hours = rawData[hoursKey] || []
       // Filter by selected employees if any
       if (selectedEmployees.length > 0) {
         return calls.some((c: any) => selectedEmployees.includes(c.employee)) ||
@@ -1326,9 +1362,11 @@ export function DashboardContent() {
   
   // Determine if there's actual data for the secondary (Performance Metrics) dashboard
   const hasDataForSecondaryDashboard = rawData ? (() => {
-    if (dashboardType === 'setters') {
-      const calls = rawData.secondarySettersCalls || []
-      const hours = rawData.secondarySettersHours || []
+    if (isSetterLikeTab(dashboardType)) {
+      const callsKey = dashboardType === 'gsp' ? 'secondaryGspCalls' : 'secondarySettersCalls'
+      const hoursKey = dashboardType === 'gsp' ? 'secondaryGspHours' : 'secondarySettersHours'
+      const calls = rawData[callsKey] || []
+      const hours = rawData[hoursKey] || []
       if (selectedEmployees.length > 0) {
         return calls.some((c: any) => selectedEmployees.includes(c.employee)) ||
                hours.some((h: any) => selectedEmployees.includes(h.employee))
@@ -1426,6 +1464,14 @@ export function DashboardContent() {
                 className="min-w-[120px] dark:border-white/10"
               >
                 IPP
+              </Button>
+              <Button
+                variant={dashboardType === "gsp" ? "default" : "outline"}
+                onClick={() => setDashboardType("gsp")}
+                size="sm"
+                className="min-w-[120px] dark:border-white/10"
+              >
+                GSP
               </Button>
             </div>
             <div className="flex gap-2 justify-evenly md:justify-start">
@@ -1709,10 +1755,23 @@ export function DashboardContent() {
           <>
             {/* IPP Dashboard - Only show employees for now */}
           </>
-        ) : dashboardType === "setters" ? (
+        ) : isSetterLikeTab(dashboardType) ? (
           <>
-            {/* Featured Metrics */}
+            {/* Featured Metrics — GSP: Horsepower only */}
             {(!data || !hasDataForCurrentDashboard) ? (
+              dashboardType === "gsp" ? (
+                <div className="mb-4 grid gap-6 grid-cols-1 max-w-xl">
+                  <Card className="p-8">
+                    <div className="flex flex-col items-center justify-center text-center min-h-[200px]">
+                      <h3 className="text-2xl font-bold mb-1">Horsepower</h3>
+                      <p className="text-sm text-muted-foreground mb-4">Combined Performance Score</p>
+                      <AlertCircle className="h-8 w-8 mb-2 text-muted-foreground" />
+                      <p className="text-sm text-muted-foreground">No data available</p>
+                      <p className="text-xs text-muted-foreground mt-1">Select a different date range</p>
+                    </div>
+                  </Card>
+                </div>
+              ) : (
               <div className="mb-4 grid gap-6 grid-cols-1 sm:grid-cols-2">
                 {[
                   { title: "Horsepower", subtitle: "Combined Performance Score" },
@@ -1729,7 +1788,28 @@ export function DashboardContent() {
                   </Card>
                 ))}
               </div>
+              )
             ) : (
+              dashboardType === "gsp" ? (
+                <div className="mb-4 grid gap-6 grid-cols-1 max-w-xl">
+                <FeaturedMetricCard
+                  title="Horsepower"
+                  value={settersMetrics.horsepower}
+                  unit="HP"
+                  color={getGaugeColor(settersMetrics.horsepower, [35, 44, 56, 72])}
+                  subtitle="Combined Performance Score"
+                  target={56}
+                  ranges={[
+                    { label: "Bad", min: 0, max: 34, color: "#ef4444" },
+                    { label: "Average", min: 35, max: 43, color: "#f97316" },
+                    { label: "Good", min: 44, max: 55, color: "#eab308" },
+                    { label: "Excellent", min: 56, max: 71, color: "#22c55e" },
+                    { label: "Elite", min: 72, color: "#3b82f6" },
+                  ]}
+                  formula="((Dials - Connected) × 1.2 + ((Connected - Pitched) × 1.5) + ((Pitched - Positive) × 4) + (Positive × 10)) ÷ Total Hours"
+                />
+                </div>
+              ) : (
               <div className="mb-4 grid gap-6 grid-cols-1 sm:grid-cols-2">
                 <FeaturedMetricCard
                   title="Horsepower"
@@ -1768,9 +1848,12 @@ export function DashboardContent() {
                   formula="Average STL (checkout to dial time) in seconds"
                 />
               </div>
+              )
             )}
 
-            {/* Setters Metrics Gauges */}
+            {/* Setters Metrics Gauges — GSP: hidden (Horsepower only tab) */}
+            {dashboardType !== "gsp" && (
+            <>
             {(!data || !hasDataForCurrentDashboard) ? (
               <div className="mb-4 grid grid-cols-2 gap-3 md:grid-cols-4">
                 {[
@@ -2224,6 +2307,8 @@ export function DashboardContent() {
                   </>
                 )}
             </div>
+            </>
+            )}
           </>
         ) : (
           <>
@@ -2328,7 +2413,8 @@ export function DashboardContent() {
           </>
         )}
 
-        {/* Employee Indicators - Show "Team Members" for admins, "Your Stats" for agents */}
+        {/* Employee Indicators — GSP tab: hidden (Horsepower-only) */}
+        {dashboardType !== "gsp" && (
         <div className="mt-6">
           <h2 className="mb-3 text-xl font-semibold">{isAdmin ? "Team Members" : "Your Stats"}</h2>
           {employees.length === 0 ? (
@@ -2359,6 +2445,7 @@ export function DashboardContent() {
             </div>
           )}
         </div>
+        )}
       </main>
 
       {/* Loading Overlay - Only show on initial load, not when waiting for custom date selection */}
@@ -2378,7 +2465,7 @@ export function DashboardContent() {
       )}
 
       {/* Conversion Data Table Dialog */}
-      {dashboardType === 'setters' && (
+      {isSetterLikeTab(dashboardType) && (
         <>
           <ConversionDataTable
             data={filteredPitchedCalls}
