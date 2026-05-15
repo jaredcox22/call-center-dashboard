@@ -42,7 +42,7 @@ import { FilterStorage, FilterState } from "@/lib/filter-storage"
 import useSWR from "swr"
 import { format } from "date-fns"
 
-type DashboardTab = "setters" | "confirmers" | "ipp" | "gsp"
+type DashboardTab = "setters" | "confirmers" | "gsp"
 
 const isSetterLikeTab = (t: DashboardTab) => t === "setters" || t === "gsp"
 
@@ -277,9 +277,10 @@ const deserializeFilterState = (stored: FilterState): {
       : null
   const qualified = Array.isArray(stored.callBucketsQualified) ? stored.callBucketsQualified : (legacyBuckets ?? [])
   const unqualified = Array.isArray(stored.callBucketsUnqualified) ? stored.callBucketsUnqualified : (legacyBuckets ?? [])
-  const validDashboardTabs: DashboardTab[] = ['setters', 'confirmers', 'ipp', 'gsp']
-  const dashboardType: DashboardTab = validDashboardTabs.includes(stored.dashboardType as DashboardTab)
-    ? (stored.dashboardType as DashboardTab)
+  const validDashboardTabs: DashboardTab[] = ['setters', 'confirmers', 'gsp']
+  const storedTab = stored.dashboardType === 'ipp' ? 'gsp' : stored.dashboardType
+  const dashboardType: DashboardTab = validDashboardTabs.includes(storedTab as DashboardTab)
+    ? (storedTab as DashboardTab)
     : 'setters'
   return {
     selectedEmployees: stored.selectedEmployees,
@@ -372,9 +373,7 @@ const transformApiData = (
       ? 'settersCalls'
       : dashboardType === 'gsp'
         ? 'gspCalls'
-        : dashboardType === 'confirmers'
-          ? 'confirmersCalls'
-          : 'ippCalls'
+        : 'confirmersCalls'
   let allCalls = apiData[callsKey] || []
   
   // Filter out excluded records from calls (using call id)
@@ -401,7 +400,7 @@ const transformApiData = (
       ? 'settersScorecards'
       : dashboardType === 'confirmers'
         ? 'confirmersScorecards'
-        : 'settersScorecards' // IPP doesn't have scorecards yet
+        : 'settersScorecards'
   const allScorecards = apiData[scorecardsKey] || []
   
   // Get hours based on dashboard type
@@ -410,9 +409,7 @@ const transformApiData = (
       ? 'settersHours'
       : dashboardType === 'gsp'
         ? 'gspHours'
-        : dashboardType === 'confirmers'
-          ? 'confirmersHours'
-          : 'IPPHours'
+        : 'confirmersHours'
   const allHours = apiData[hoursKey] || []
   
   // Keep team-wide STL data (checkout to dial time is a TEAM metric)
@@ -522,8 +519,8 @@ const transformApiData = (
     })
   })
   
-  // For IPP dashboard, also add employees from hours even if they have no calls
-  if (dashboardType === 'ipp') {
+  // For GSP dashboard, also add employees from hours even if they have no calls
+  if (dashboardType === 'gsp') {
     hoursByEmployee.forEach((hours, employeeName) => {
       if (!employees.has(employeeName)) {
         employees.set(employeeName, {
@@ -853,11 +850,9 @@ export function DashboardContent() {
       settersCalls: rawData.secondarySettersCalls || [],
       gspCalls: rawData.secondaryGspCalls || [],
       confirmersCalls: rawData.secondaryConfirmersCalls || [],
-      ippCalls: rawData.secondaryIPPCalls || [],
       settersHours: rawData.secondarySettersHours || [],
       gspHours: rawData.secondaryGspHours || [],
       confirmersHours: rawData.secondaryConfirmersHours || [],
-      IPPHours: rawData.secondaryIPPHours || [],
       settersScorecards: rawData.secondarySettersScorecards || [],
       confirmersScorecards: rawData.secondaryConfirmersScorecards || [],
       settersAppointments: rawData.secondarySettersAppointments || [],
@@ -877,15 +872,12 @@ export function DashboardContent() {
     const hasSettersData = (rawData.settersCalls?.length > 0) || (rawData.settersHours?.length > 0)
     const hasGspData = (rawData.gspCalls?.length > 0) || (rawData.gspHours?.length > 0)
     const hasConfirmersData = (rawData.confirmersCalls?.length > 0) || (rawData.confirmersHours?.length > 0)
-    const hasIPPData = (rawData.ippCalls?.length > 0) || (rawData.IPPHours?.length > 0)
     
-    // Auto-select the first tab that has data (GSP last, after IPP)
+    // Auto-select the first tab that has data
     if (hasSettersData) {
       setDashboardType('setters')
     } else if (hasConfirmersData) {
       setDashboardType('confirmers')
-    } else if (hasIPPData) {
-      setDashboardType('ipp')
     } else if (hasGspData) {
       setDashboardType('gsp')
     }
@@ -895,31 +887,24 @@ export function DashboardContent() {
 
   // Get unique employees from the appropriate calls array or hours array based on dashboard type
   const availableEmployees = rawData ? (() => {
-    if (dashboardType === 'ipp') {
-      // For IPP, get employees from IPPEmployees array or IPPHours
-      const ippEmployees = rawData.IPPEmployees || []
-      const ippHours = rawData.IPPHours || []
-      const uniqueEmployees = new Set<string>()
-      ippEmployees.forEach((emp: string) => uniqueEmployees.add(emp))
-      ippHours.forEach((h: any) => {
-        if (h.employee) {
-          uniqueEmployees.add(h.employee)
-        }
-      })
-      return Array.from(uniqueEmployees).sort()
-    } else {
-      const callsKey = isSetterLikeTab(dashboardType)
-        ? (dashboardType === 'gsp' ? 'gspCalls' : 'settersCalls')
-        : 'confirmersCalls'
-      const calls = rawData[callsKey] || []
-      const uniqueEmployees = new Set<string>()
-      calls.forEach((call: any) => {
-        if (call.employee) {
-          uniqueEmployees.add(call.employee)
-        }
-      })
-      return Array.from(uniqueEmployees).sort()
-    }
+    const uniqueEmployees = new Set<string>()
+    const callsKey = isSetterLikeTab(dashboardType)
+      ? (dashboardType === 'gsp' ? 'gspCalls' : 'settersCalls')
+      : 'confirmersCalls'
+    const hoursKey = dashboardType === 'gsp' ? 'gspHours' : dashboardType === 'setters' ? 'settersHours' : 'confirmersHours'
+    const calls = rawData[callsKey] || []
+    const hours = rawData[hoursKey] || []
+    calls.forEach((call: any) => {
+      if (call.employee) {
+        uniqueEmployees.add(call.employee)
+      }
+    })
+    hours.forEach((h: any) => {
+      if (h.employee) {
+        uniqueEmployees.add(h.employee)
+      }
+    })
+    return Array.from(uniqueEmployees).sort()
   })() : []
 
   // Auto-reset employee filter if selected employees don't exist in current data
@@ -1349,14 +1334,6 @@ export function DashboardContent() {
                hours.some((h: any) => selectedEmployees.includes(h.employee))
       }
       return calls.length > 0 || hours.length > 0
-    } else {
-      const calls = rawData.ippCalls || []
-      const hours = rawData.IPPHours || []
-      if (selectedEmployees.length > 0) {
-        return calls.some((c: any) => selectedEmployees.includes(c.employee)) ||
-               hours.some((h: any) => selectedEmployees.includes(h.employee))
-      }
-      return calls.length > 0 || hours.length > 0
     }
   })() : false
   
@@ -1372,23 +1349,14 @@ export function DashboardContent() {
                hours.some((h: any) => selectedEmployees.includes(h.employee))
       }
       return calls.length > 0 || hours.length > 0
-    } else if (dashboardType === 'confirmers') {
-      const calls = rawData.secondaryConfirmersCalls || []
-      const hours = rawData.secondaryConfirmersHours || []
-      if (selectedEmployees.length > 0) {
-        return calls.some((c: any) => selectedEmployees.includes(c.employee)) ||
-               hours.some((h: any) => selectedEmployees.includes(h.employee))
-      }
-      return calls.length > 0 || hours.length > 0
-    } else {
-      const calls = rawData.secondaryIPPCalls || []
-      const hours = rawData.secondaryIPPHours || []
-      if (selectedEmployees.length > 0) {
-        return calls.some((c: any) => selectedEmployees.includes(c.employee)) ||
-               hours.some((h: any) => selectedEmployees.includes(h.employee))
-      }
-      return calls.length > 0 || hours.length > 0
     }
+    const calls = rawData.secondaryConfirmersCalls || []
+    const hours = rawData.secondaryConfirmersHours || []
+    if (selectedEmployees.length > 0) {
+      return calls.some((c: any) => selectedEmployees.includes(c.employee)) ||
+             hours.some((h: any) => selectedEmployees.includes(h.employee))
+    }
+    return calls.length > 0 || hours.length > 0
   })() : false
 
   return (
@@ -1456,14 +1424,6 @@ export function DashboardContent() {
                 className="min-w-[120px] dark:border-white/10"
               >
                 {isAgent ? "Confirmer" : "Confirmers"}
-              </Button>
-              <Button
-                variant={dashboardType === "ipp" ? "default" : "outline"}
-                onClick={() => setDashboardType("ipp")}
-                size="sm"
-                className="min-w-[120px] dark:border-white/10"
-              >
-                IPP
               </Button>
               <Button
                 variant={dashboardType === "gsp" ? "default" : "outline"}
@@ -1751,11 +1711,7 @@ export function DashboardContent() {
           </div>
         </Card>
 
-        {dashboardType === "ipp" ? (
-          <>
-            {/* IPP Dashboard - Only show employees for now */}
-          </>
-        ) : isSetterLikeTab(dashboardType) ? (
+        {isSetterLikeTab(dashboardType) ? (
           <>
             {/* Featured Metrics — GSP: Horsepower only */}
             {(!data || !hasDataForCurrentDashboard) ? (
@@ -2439,7 +2395,6 @@ export function DashboardContent() {
                   conversions={employee.conversions}
                   hours={employee.hours}
                   horsepower={dashboardType === 'setters' ? employee.horsepower : undefined}
-                  ippMode={dashboardType === 'ipp'}
                 />
               ))}
             </div>

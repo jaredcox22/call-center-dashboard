@@ -52,7 +52,6 @@ $holidays = [
         $responseData = [
             'settersCalls' => [],
             'confirmersCalls' => [],
-            'ippCalls' => [],
             'gspCalls' => [],
             'gspHours' => [],
             'hours' => [],
@@ -210,6 +209,8 @@ $holidays = [
     $gspCclIds = [10, 11, 18, 19];
     $gspCclSqlIn = implode(',', array_map('intval', $gspCclIds));
     $excludeGspCclSql = " AND (cls_Calls.ccl_id IS NULL OR cls_Calls.ccl_id NOT IN ($gspCclSqlIn))";
+    // GSP calls: GSP cold-call lists and/or legacy IPP call type (cty_id)
+    $gspCallsFilterSql = " AND cty_id NOT IN ('C') AND (cls_Calls.ccl_id IN ($gspCclSqlIn) OR cty_id = 'IPP')";
 
     if(array_key_exists('test', $_GET)){
 
@@ -247,7 +248,7 @@ $holidays = [
         $timesheetEmployees = [];
         $settersTimesheetEmployees = []; // Hours for employees clocked into Setter operational unit
         $confirmersTimesheetEmployees = []; // Hours for employees clocked into Confirmer operational unit
-        $ippTimesheetEmployees = []; // Hours for employees clocked into IPP Dialing - Office operational unit
+        $gspTimesheetEmployees = []; // Hours for employees clocked into GSP operational unit
         $employeeType = []; // Track if employee is setter or confirmer
         $employeeOperationalUnits = []; // Track operational units from timesheets
         $deputyIDOperationalUnits = []; // Track operational units per deputy ID to classify them
@@ -271,19 +272,14 @@ $holidays = [
                     }
                 }
                 
-                // Determine if this timesheet is for a setter, confirmer, or IPP based on operational unit
+                // Determine if this timesheet is for a setter, confirmer, or GSP based on operational unit
                 $isSetterOperationalUnit = $operationalUnitName === 'Setter';
                 $isConfirmerOperationalUnit = $operationalUnitName && (
                     $operationalUnitName === 'Confirmer' || 
                     $operationalUnitName === 'Confirmer - Office' ||
                     stripos($operationalUnitName, 'Confirmer') !== false
                 );
-                $isIPPOperationalUnit = $operationalUnitName && (
-                    $operationalUnitName === 'IPP' ||
-                    $operationalUnitName === 'IPP Dialing - Office' ||
-                    stripos($operationalUnitName, 'IPP Dialing') !== false ||
-                    stripos($operationalUnitName, 'IPP') !== false
-                );
+                $isGSPOperationalUnit = isGspOperationalUnit($operationalUnitName);
                 
                 if($timesheet['IsInProgress']){
                     $timesheet['EndTimeLocalized'] = date('Y-m-d H:i:s');
@@ -324,12 +320,12 @@ $holidays = [
                     $confirmersTimesheetEmployees[$employeeID]['hours'] += $hoursToAdd;
                 }
                 
-                // Add to IPP-specific hours if operational unit is IPP Dialing - Office
-                if($isIPPOperationalUnit){
-                    if(!array_key_exists($employeeID, $ippTimesheetEmployees)){
-                        $ippTimesheetEmployees[$employeeID] = ['hours' => 0];
+                // Add to GSP-specific hours if operational unit is GSP (includes legacy IPP units)
+                if($isGSPOperationalUnit){
+                    if(!array_key_exists($employeeID, $gspTimesheetEmployees)){
+                        $gspTimesheetEmployees[$employeeID] = ['hours' => 0];
                     }
-                    $ippTimesheetEmployees[$employeeID]['hours'] += $hoursToAdd;
+                    $gspTimesheetEmployees[$employeeID]['hours'] += $hoursToAdd;
                 }
                 
                 // Track operational units for this employee
@@ -347,11 +343,11 @@ $holidays = [
         // STEP 3: Classify deputy IDs based on operational unit
         $settersDeputyIDs = [];
         $confirmersDeputyIDs = [];
-        $ippDeputyIDs = [];
+        $gspDeputyIDs = [];
         foreach($deputyIDs as $deputyID){
             $hasSetterUnit = false;
             $hasConfirmerUnit = false;
-            $hasIPPUnit = false;
+            $hasGSPUnit = false;
             
             if(isset($deputyIDOperationalUnits[$deputyID])){
                 foreach($deputyIDOperationalUnits[$deputyID] as $unitName){
@@ -361,8 +357,8 @@ $holidays = [
                     if($unitName === 'Confirmer' || $unitName === 'Confirmer - Office' || stripos($unitName, 'Confirmer') !== false){
                         $hasConfirmerUnit = true;
                     }
-                    if($unitName === 'IPP' || $unitName === 'IPP Dialing - Office' || stripos($unitName, 'IPP Dialing') !== false || stripos($unitName, 'IPP') !== false){
-                        $hasIPPUnit = true;
+                    if(isGspOperationalUnit($unitName)){
+                        $hasGSPUnit = true;
                     }
                 }
             }
@@ -373,26 +369,25 @@ $holidays = [
             if($hasConfirmerUnit){
                 $confirmersDeputyIDs[] = $deputyID;
             }
-            if($hasIPPUnit){
-                $ippDeputyIDs[] = $deputyID;
+            if($hasGSPUnit){
+                $gspDeputyIDs[] = $deputyID;
             }
         }
         
         // Make deputy ID arrays unique
         $settersDeputyIDs = array_unique($settersDeputyIDs);
         $confirmersDeputyIDs = array_unique($confirmersDeputyIDs);
-        $ippDeputyIDs = array_unique($ippDeputyIDs);
+        $gspDeputyIDs = array_unique($gspDeputyIDs);
         
         // DEBUG: Track employee types
         $debugInfo = [
             'settersDeputyIDs' => $settersDeputyIDs,
             'confirmersDeputyIDs' => $confirmersDeputyIDs,
-            'ippDeputyIDs' => $ippDeputyIDs,
+            'gspDeputyIDs' => $gspDeputyIDs,
             'allDeputyIDs' => $deputyIDs,
             'deputyIDOperationalUnits' => $deputyIDOperationalUnits,
             'settersEmployeeNames' => [],
             'confirmersEmployeeNames' => [],
-            'ippEmployeeNames' => [],
             'timesheetProcessing' => [],
             'timesheetEmployeesDetails' => [],
             'finalHoursBreakdown' => []
@@ -401,7 +396,6 @@ $holidays = [
         // STEP 4: Fetch calls filtered by classified deputy IDs (at SQL level)
         $settersCalls = [];
         $confirmersCalls = [];
-        $ippCalls = [];
         $gspCalls = [];
         
         // Fetch setters calls - only for employees clocked into Setter operational unit
@@ -409,7 +403,12 @@ $holidays = [
             $settersDeputyIdsList = implode(',', $settersDeputyIDs);
             $settersCallsQuery = "SELECT emp_user_12, emp_id, LastName, cls_Calls.id as id, FirstName, CallDate, ResultCode, cty_id, Connected, Pitched, Positive, qualified, lds_Leads.ApptSet, lds_Leads.Issued, cls_Calls.lds_id, cls_Calls.cst_id, cls_Calls.cqd_id FROM cls_Calls LEFT JOIN clr_CallResults ON ResultCode = clr_CallResults.id LEFT JOIN emp_Employees ON emp_id = emp_Employees.id LEFT JOIN lds_Leads ON cls_Calls.lds_id = lds_Leads.id LEFT JOIN srs_SourceSubs ON lds_Leads.srs_id = srs_SourceSubs.id WHERE CallDate BETWEEN '$start' AND '$end' AND ResultCode NOT IN ('*ND', 'TXT') AND Dialer = 'True' AND emp_user_12 IN ($settersDeputyIdsList) AND cty_id NOT IN ('C', 'IPP')$excludeGspCclSql";
             $settersCalls = curlCall("$endpoint/lp/customReport.php?rptSQL=" . urlencode($settersCallsQuery));
-            $gspCallsQuery = "SELECT emp_user_12, emp_id, LastName, cls_Calls.id as id, FirstName, CallDate, ResultCode, cty_id, Connected, Pitched, Positive, qualified, lds_Leads.ApptSet, lds_Leads.Issued, cls_Calls.lds_id, cls_Calls.cst_id, cls_Calls.cqd_id FROM cls_Calls LEFT JOIN clr_CallResults ON ResultCode = clr_CallResults.id LEFT JOIN emp_Employees ON emp_id = emp_Employees.id LEFT JOIN lds_Leads ON cls_Calls.lds_id = lds_Leads.id LEFT JOIN srs_SourceSubs ON lds_Leads.srs_id = srs_SourceSubs.id WHERE CallDate BETWEEN '$start' AND '$end' AND ResultCode NOT IN ('*ND', 'TXT') AND Dialer = 'True' AND emp_user_12 IN ($settersDeputyIdsList) AND cty_id NOT IN ('C', 'IPP') AND cls_Calls.ccl_id IN ($gspCclSqlIn)";
+        }
+        
+        // Fetch GSP calls - only for employees clocked into GSP operational unit
+        if(!empty($gspDeputyIDs)){
+            $gspDeputyIdsList = implode(',', $gspDeputyIDs);
+            $gspCallsQuery = "SELECT emp_user_12, emp_id, LastName, cls_Calls.id as id, FirstName, CallDate, ResultCode, cty_id, Connected, Pitched, Positive, qualified, lds_Leads.ApptSet, lds_Leads.Issued, cls_Calls.lds_id, cls_Calls.cst_id, cls_Calls.cqd_id FROM cls_Calls LEFT JOIN clr_CallResults ON ResultCode = clr_CallResults.id LEFT JOIN emp_Employees ON emp_id = emp_Employees.id LEFT JOIN lds_Leads ON cls_Calls.lds_id = lds_Leads.id LEFT JOIN srs_SourceSubs ON lds_Leads.srs_id = srs_SourceSubs.id WHERE CallDate BETWEEN '$start' AND '$end' AND ResultCode NOT IN ('*ND', 'TXT') AND Dialer = 'True' AND emp_user_12 IN ($gspDeputyIdsList)$gspCallsFilterSql";
             $gspCalls = curlCall("$endpoint/lp/customReport.php?rptSQL=" . urlencode($gspCallsQuery));
         }
         
@@ -418,13 +417,6 @@ $holidays = [
             $confirmersDeputyIdsList = implode(',', $confirmersDeputyIDs);
             $confirmersCallsQuery = "SELECT emp_user_12, emp_id, LastName, cls_Calls.id as id, FirstName, CallDate, ResultCode, cty_id, Connected, Pitched, Positive, qualified, lds_Leads.ApptSet, lds_Leads.Issued, cls_Calls.cqd_id FROM cls_Calls LEFT JOIN clr_CallResults ON ResultCode = clr_CallResults.id LEFT JOIN emp_Employees ON emp_id = emp_Employees.id LEFT JOIN lds_Leads ON cls_Calls.lds_id = lds_Leads.id LEFT JOIN srs_SourceSubs ON lds_Leads.srs_id = srs_SourceSubs.id WHERE CallDate BETWEEN '$start' AND '$end' AND ResultCode NOT IN ('*ND', 'TXT') AND Dialer = 'True' AND emp_user_12 IN ($confirmersDeputyIdsList) AND cty_id = 'C'$excludeGspCclSql";
             $confirmersCalls = curlCall("$endpoint/lp/customReport.php?rptSQL=" . urlencode($confirmersCallsQuery));
-        }
-        
-        // Fetch IPP calls - only for employees clocked into IPP operational unit
-        if(!empty($ippDeputyIDs)){
-            $ippDeputyIdsList = implode(',', $ippDeputyIDs);
-            $ippCallsQuery = "SELECT emp_user_12, emp_id, LastName, cls_Calls.id as id, FirstName, CallDate, ResultCode, cty_id, Connected, Pitched, Positive, qualified, lds_Leads.ApptSet, lds_Leads.Issued, cls_Calls.cqd_id FROM cls_Calls LEFT JOIN clr_CallResults ON ResultCode = clr_CallResults.id LEFT JOIN emp_Employees ON emp_id = emp_Employees.id LEFT JOIN lds_Leads ON cls_Calls.lds_id = lds_Leads.id LEFT JOIN srs_SourceSubs ON lds_Leads.srs_id = srs_SourceSubs.id WHERE CallDate BETWEEN '$start' AND '$end' AND ResultCode NOT IN ('*ND', 'TXT') AND Dialer = 'True' AND emp_user_12 IN ($ippDeputyIdsList) AND cty_id = 'IPP'$excludeGspCclSql";
-            $ippCalls = curlCall("$endpoint/lp/customReport.php?rptSQL=" . urlencode($ippCallsQuery));
         }
 
         // STEP 5: Process setters calls (already filtered by operational unit at SQL level)
@@ -496,53 +488,19 @@ $holidays = [
             ];
         }
 
-        // Process IPP calls (already filtered by operational unit at SQL level)
-        foreach($ippCalls as $call){
-            $deputyID = $call['emp_user_12'];
-            if(!array_key_exists(intval($deputyID), $timesheetEmployees)){
-                continue;
-            }
-
-            $employeeName = $call['FirstName'] . " " . $call['LastName'];
-            $employeeID = intval($deputyID);
-            $timesheetEmployees[$employeeID]['employee'] = $employeeName;
-            // Set employee name in IPP-specific hours if they have IPP hours
-            if(array_key_exists($employeeID, $ippTimesheetEmployees)){
-                $ippTimesheetEmployees[$employeeID]['employee'] = $employeeName;
-            }
-            $employeeType[$employeeID] = 'ipp';
-            if(!in_array($employeeName, $debugInfo['ippEmployeeNames'])){
-                $debugInfo['ippEmployeeNames'][] = $employeeName;
-            }
-            $responseData['ippCalls'][] = [
-                'id' => $call['id'],
-                'employee' => $employeeName,
-                'date' => $call['CallDate'],
-                'result' => $call['ResultCode'],
-                'cty_id' => $call['cty_id'],
-                'connected' => $call['Connected'],
-                'pitched' => $call['Pitched'],
-                'positive' => $call['Positive'],
-                'qualified' => ($call['qualified'] == 1 ? true : false),
-                'ApptSet' => $call['ApptSet'] ?? null,
-                'Issued' => $call['Issued'] ?? null,
-                'cqd_id' => $call['cqd_id'] ?? null,
-            ];
-        }
-
-        // Process GSP calls (setter deputies + GSP cold-call list IDs only)
+        // Process GSP calls (GSP deputies + GSP cold-call list IDs / legacy IPP call type)
         foreach($gspCalls as $call){
             $deputyID = $call['emp_user_12'];
-            if(!array_key_exists(intval($deputyID), $timesheetEmployees)){
+            if(!array_key_exists(intval($deputyID), $gspTimesheetEmployees)){
                 continue;
             }
             $employeeName = $call['FirstName'] . " " . $call['LastName'];
             $employeeID = intval($deputyID);
             $timesheetEmployees[$employeeID]['employee'] = $employeeName;
-            if(array_key_exists($employeeID, $settersTimesheetEmployees)){
-                $settersTimesheetEmployees[$employeeID]['employee'] = $employeeName;
+            if(array_key_exists($employeeID, $gspTimesheetEmployees)){
+                $gspTimesheetEmployees[$employeeID]['employee'] = $employeeName;
             }
-            $employeeType[$employeeID] = 'setter';
+            $employeeType[$employeeID] = 'gsp';
             $responseData['gspCalls'][] = [
                 'id' => $call['id'],
                 'employee' => $employeeName,
@@ -621,41 +579,20 @@ $holidays = [
             }
         }
         
-        // Set employee names for IPP hours (in case they have hours but no calls)
-        foreach($ippTimesheetEmployees as $empID => $empData){
+        // Set employee names for GSP hours (in case they have hours but no calls)
+        foreach($gspTimesheetEmployees as $empID => $empData){
             if(!isset($empData['employee']) || empty($empData['employee'])){
-                // Try to get name from timesheetEmployees
                 if(isset($timesheetEmployees[$empID]['employee'])){
-                    $ippTimesheetEmployees[$empID]['employee'] = $timesheetEmployees[$empID]['employee'];
+                    $gspTimesheetEmployees[$empID]['employee'] = $timesheetEmployees[$empID]['employee'];
                 } else {
-                    // Try to get name from IPP calls first (most relevant)
-                    foreach($ippCalls as $call){
+                    foreach($gspCalls as $call){
                         if(intval($call['emp_user_12']) == $empID){
-                            $ippTimesheetEmployees[$empID]['employee'] = $call['FirstName'] . " " . $call['LastName'];
+                            $gspTimesheetEmployees[$empID]['employee'] = $call['FirstName'] . " " . $call['LastName'];
                             break;
                         }
                     }
-                    // If still not found, try setters calls
-                    if(!isset($ippTimesheetEmployees[$empID]['employee'])){
-                        foreach($settersCalls as $call){
-                            if(intval($call['emp_user_12']) == $empID){
-                                $ippTimesheetEmployees[$empID]['employee'] = $call['FirstName'] . " " . $call['LastName'];
-                                break;
-                            }
-                        }
-                    }
-                    // If still not found, try confirmers calls
-                    if(!isset($ippTimesheetEmployees[$empID]['employee'])){
-                        foreach($confirmersCalls as $call){
-                            if(intval($call['emp_user_12']) == $empID){
-                                $ippTimesheetEmployees[$empID]['employee'] = $call['FirstName'] . " " . $call['LastName'];
-                                break;
-                            }
-                        }
-                    }
-                    // If still not found, try to get from deputy mapping
-                    if(!isset($ippTimesheetEmployees[$empID]['employee']) && isset($deputyToNameMapping[$empID])){
-                        $ippTimesheetEmployees[$empID]['employee'] = $deputyToNameMapping[$empID];
+                    if(!isset($gspTimesheetEmployees[$empID]['employee']) && isset($deputyToNameMapping[$empID])){
+                        $gspTimesheetEmployees[$empID]['employee'] = $deputyToNameMapping[$empID];
                     }
                 }
             }
@@ -665,8 +602,7 @@ $holidays = [
         // This ensures only employees clocked into "Setter" operational unit appear in setters hours
         $responseData['settersHours'] = array_values($settersTimesheetEmployees);
         $responseData['confirmersHours'] = array_values($confirmersTimesheetEmployees);
-        $responseData['IPPHours'] = array_values($ippTimesheetEmployees);
-        $responseData['gspHours'] = [];
+        $responseData['gspHours'] = array_values($gspTimesheetEmployees);
         
         // DEBUG: Analyze final hours array (now using setter-specific hours)
         $settersInHours = 0;
@@ -771,10 +707,9 @@ $holidays = [
         // Add debug info to response
         $responseData['_debug'] = $debugInfo;
 
-        // Get unique employee names for setters, confirmers, and IPP
+        // Get unique employee names for setters and confirmers
         $settersEmployeeNames = [];
         $confirmersEmployeeNames = [];
-        $ippEmployeeNames = [];
         
         foreach($settersCalls as $call){
             $employeeName = $call['FirstName'] . " " . $call['LastName'];
@@ -789,17 +724,6 @@ $holidays = [
                 $confirmersEmployeeNames[] = $employeeName;
             }
         }
-        
-        // Get IPP employee names from IPP hours array
-        foreach($ippTimesheetEmployees as $empData){
-            $employeeName = $empData['employee'] ?? null;
-            if($employeeName && !in_array($employeeName, $ippEmployeeNames)){
-                $ippEmployeeNames[] = $employeeName;
-            }
-        }
-        
-        // Add IPPEmployees to response
-        $responseData['IPPEmployees'] = $ippEmployeeNames;
 
         // Query scorecards for setters and confirmers
         $integrityDB = new db(
@@ -1020,12 +944,10 @@ $holidays = [
     // Fetch secondary data for performance metrics if secondaryDateRange is provided
     $responseData['secondarySettersCalls'] = [];
     $responseData['secondaryConfirmersCalls'] = [];
-    $responseData['secondaryIPPCalls'] = [];
     $responseData['secondaryGspCalls'] = [];
     $responseData['secondaryGspHours'] = [];
     $responseData['secondarySettersHours'] = [];
     $responseData['secondaryConfirmersHours'] = [];
-    $responseData['secondaryIPPHours'] = [];
     $responseData['secondarySettersScorecards'] = [];
     $responseData['secondaryConfirmersScorecards'] = [];
     $responseData['secondarySettersAppointments'] = [];
@@ -1060,13 +982,13 @@ $holidays = [
         $secondaryTimesheetEmployees = [];
         $secondarySettersTimesheetEmployees = []; // Hours for employees clocked into Setter operational unit
         $secondaryConfirmersTimesheetEmployees = []; // Hours for employees clocked into Confirmer operational unit
-        $secondaryIPPTimesheetEmployees = []; // Hours for employees clocked into IPP Dialing - Office operational unit
+        $secondaryGspTimesheetEmployees = []; // Hours for employees clocked into GSP operational unit
         $secondaryDeputyIDOperationalUnits = []; // Track operational units per deputy ID
         
         foreach($secondaryDeputyIDs as $deputyID){
             $theseTimesheets = curlCall("$endpoint/deputy/getTimesheets.php?startDate=$secondaryStart&endDate=$secondaryEnd&id=" . intval($deputyID));
             foreach($theseTimesheets as $timesheet){
-                // Determine if this timesheet is for a setter, confirmer, or IPP based on operational unit
+                // Determine if this timesheet is for a setter, confirmer, or GSP based on operational unit
                 $operationalUnitName = null;
                 if(isset($timesheet['_DPMetaData']['OperationalUnitInfo']['OperationalUnitName'])){
                     $operationalUnitName = $timesheet['_DPMetaData']['OperationalUnitInfo']['OperationalUnitName'];
@@ -1088,12 +1010,7 @@ $holidays = [
                     $operationalUnitName === 'Confirmer - Office' ||
                     stripos($operationalUnitName, 'Confirmer') !== false
                 );
-                $isIPPOperationalUnit = $operationalUnitName && (
-                    $operationalUnitName === 'IPP' ||
-                    $operationalUnitName === 'IPP Dialing - Office' ||
-                    stripos($operationalUnitName, 'IPP Dialing') !== false ||
-                    stripos($operationalUnitName, 'IPP') !== false
-                );
+                $isGSPOperationalUnit = isGspOperationalUnit($operationalUnitName);
                 
                 if($timesheet['IsInProgress']){
                     $timesheet['EndTimeLocalized'] = date('Y-m-d H:i:s');
@@ -1133,12 +1050,12 @@ $holidays = [
                     $secondaryConfirmersTimesheetEmployees[$employeeID]['hours'] += $hoursToAdd;
                 }
                 
-                // Add to IPP-specific hours if operational unit is IPP Dialing - Office
-                if($isIPPOperationalUnit){
-                    if(!array_key_exists($employeeID, $secondaryIPPTimesheetEmployees)){
-                        $secondaryIPPTimesheetEmployees[$employeeID] = ['hours' => 0];
+                // Add to GSP-specific hours if operational unit is GSP (includes legacy IPP units)
+                if($isGSPOperationalUnit){
+                    if(!array_key_exists($employeeID, $secondaryGspTimesheetEmployees)){
+                        $secondaryGspTimesheetEmployees[$employeeID] = ['hours' => 0];
                     }
-                    $secondaryIPPTimesheetEmployees[$employeeID]['hours'] += $hoursToAdd;
+                    $secondaryGspTimesheetEmployees[$employeeID]['hours'] += $hoursToAdd;
                 }
             }
         }
@@ -1146,11 +1063,11 @@ $holidays = [
         // STEP 3: Classify secondary deputy IDs based on operational unit
         $secondarySettersDeputyIDs = [];
         $secondaryConfirmersDeputyIDs = [];
-        $secondaryIPPDeputyIDs = [];
+        $secondaryGspDeputyIDs = [];
         foreach($secondaryDeputyIDs as $deputyID){
             $hasSetterUnit = false;
             $hasConfirmerUnit = false;
-            $hasIPPUnit = false;
+            $hasGSPUnit = false;
             
             if(isset($secondaryDeputyIDOperationalUnits[$deputyID])){
                 foreach($secondaryDeputyIDOperationalUnits[$deputyID] as $unitName){
@@ -1160,8 +1077,8 @@ $holidays = [
                     if($unitName === 'Confirmer' || $unitName === 'Confirmer - Office' || stripos($unitName, 'Confirmer') !== false){
                         $hasConfirmerUnit = true;
                     }
-                    if($unitName === 'IPP' || $unitName === 'IPP Dialing - Office' || stripos($unitName, 'IPP Dialing') !== false || stripos($unitName, 'IPP') !== false){
-                        $hasIPPUnit = true;
+                    if(isGspOperationalUnit($unitName)){
+                        $hasGSPUnit = true;
                     }
                 }
             }
@@ -1172,20 +1089,19 @@ $holidays = [
             if($hasConfirmerUnit){
                 $secondaryConfirmersDeputyIDs[] = $deputyID;
             }
-            if($hasIPPUnit){
-                $secondaryIPPDeputyIDs[] = $deputyID;
+            if($hasGSPUnit){
+                $secondaryGspDeputyIDs[] = $deputyID;
             }
         }
         
         // Make arrays unique
         $secondarySettersDeputyIDs = array_unique($secondarySettersDeputyIDs);
         $secondaryConfirmersDeputyIDs = array_unique($secondaryConfirmersDeputyIDs);
-        $secondaryIPPDeputyIDs = array_unique($secondaryIPPDeputyIDs);
+        $secondaryGspDeputyIDs = array_unique($secondaryGspDeputyIDs);
         
         // STEP 4: Fetch secondary calls filtered by classified deputy IDs (at SQL level)
         $secondarySettersCalls = [];
         $secondaryConfirmersCalls = [];
-        $secondaryIPPCalls = [];
         $secondaryGspCalls = [];
         
         // Fetch secondary setters calls - only for employees clocked into Setter operational unit
@@ -1193,7 +1109,12 @@ $holidays = [
             $secondarySettersDeputyIdsList = implode(',', $secondarySettersDeputyIDs);
             $secondarySettersCallsQuery = "SELECT emp_user_12, emp_id, LastName, cls_Calls.id as id, FirstName, CallDate, ResultCode, cty_id, Connected, Pitched, Positive, qualified, lds_Leads.ApptSet, lds_Leads.Issued, cls_Calls.lds_id, cls_Calls.cst_id, cls_Calls.cqd_id FROM cls_Calls LEFT JOIN clr_CallResults ON ResultCode = clr_CallResults.id LEFT JOIN emp_Employees ON emp_id = emp_Employees.id LEFT JOIN lds_Leads ON cls_Calls.lds_id = lds_Leads.id LEFT JOIN srs_SourceSubs ON lds_Leads.srs_id = srs_SourceSubs.id WHERE CallDate BETWEEN '$secondaryStart' AND '$secondaryEnd' AND ResultCode NOT IN ('*ND', 'TXT') AND Dialer = 'True' AND emp_user_12 IN ($secondarySettersDeputyIdsList) AND cty_id NOT IN ('C', 'IPP')$excludeGspCclSql";
             $secondarySettersCalls = curlCall("$endpoint/lp/customReport.php?rptSQL=" . urlencode($secondarySettersCallsQuery));
-            $secondaryGspCallsQuery = "SELECT emp_user_12, emp_id, LastName, cls_Calls.id as id, FirstName, CallDate, ResultCode, cty_id, Connected, Pitched, Positive, qualified, lds_Leads.ApptSet, lds_Leads.Issued, cls_Calls.lds_id, cls_Calls.cst_id, cls_Calls.cqd_id FROM cls_Calls LEFT JOIN clr_CallResults ON ResultCode = clr_CallResults.id LEFT JOIN emp_Employees ON emp_id = emp_Employees.id LEFT JOIN lds_Leads ON cls_Calls.lds_id = lds_Leads.id LEFT JOIN srs_SourceSubs ON lds_Leads.srs_id = srs_SourceSubs.id WHERE CallDate BETWEEN '$secondaryStart' AND '$secondaryEnd' AND ResultCode NOT IN ('*ND', 'TXT') AND Dialer = 'True' AND emp_user_12 IN ($secondarySettersDeputyIdsList) AND cty_id NOT IN ('C', 'IPP') AND cls_Calls.ccl_id IN ($gspCclSqlIn)";
+        }
+        
+        // Fetch secondary GSP calls - only for employees clocked into GSP operational unit
+        if(!empty($secondaryGspDeputyIDs)){
+            $secondaryGspDeputyIdsList = implode(',', $secondaryGspDeputyIDs);
+            $secondaryGspCallsQuery = "SELECT emp_user_12, emp_id, LastName, cls_Calls.id as id, FirstName, CallDate, ResultCode, cty_id, Connected, Pitched, Positive, qualified, lds_Leads.ApptSet, lds_Leads.Issued, cls_Calls.lds_id, cls_Calls.cst_id, cls_Calls.cqd_id FROM cls_Calls LEFT JOIN clr_CallResults ON ResultCode = clr_CallResults.id LEFT JOIN emp_Employees ON emp_id = emp_Employees.id LEFT JOIN lds_Leads ON cls_Calls.lds_id = lds_Leads.id LEFT JOIN srs_SourceSubs ON lds_Leads.srs_id = srs_SourceSubs.id WHERE CallDate BETWEEN '$secondaryStart' AND '$secondaryEnd' AND ResultCode NOT IN ('*ND', 'TXT') AND Dialer = 'True' AND emp_user_12 IN ($secondaryGspDeputyIdsList)$gspCallsFilterSql";
             $secondaryGspCalls = curlCall("$endpoint/lp/customReport.php?rptSQL=" . urlencode($secondaryGspCallsQuery));
         }
         
@@ -1202,13 +1123,6 @@ $holidays = [
             $secondaryConfirmersDeputyIdsList = implode(',', $secondaryConfirmersDeputyIDs);
             $secondaryConfirmersCallsQuery = "SELECT emp_user_12, emp_id, LastName, cls_Calls.id as id, FirstName, CallDate, ResultCode, cty_id, Connected, Pitched, Positive, qualified, lds_Leads.ApptSet, lds_Leads.Issued, cls_Calls.cqd_id FROM cls_Calls LEFT JOIN clr_CallResults ON ResultCode = clr_CallResults.id LEFT JOIN emp_Employees ON emp_id = emp_Employees.id LEFT JOIN lds_Leads ON cls_Calls.lds_id = lds_Leads.id LEFT JOIN srs_SourceSubs ON lds_Leads.srs_id = srs_SourceSubs.id WHERE CallDate BETWEEN '$secondaryStart' AND '$secondaryEnd' AND ResultCode NOT IN ('*ND', 'TXT') AND Dialer = 'True' AND emp_user_12 IN ($secondaryConfirmersDeputyIdsList) AND cty_id = 'C'$excludeGspCclSql";
             $secondaryConfirmersCalls = curlCall("$endpoint/lp/customReport.php?rptSQL=" . urlencode($secondaryConfirmersCallsQuery));
-        }
-        
-        // Fetch secondary IPP calls - only for employees clocked into IPP operational unit
-        if(!empty($secondaryIPPDeputyIDs)){
-            $secondaryIPPDeputyIdsList = implode(',', $secondaryIPPDeputyIDs);
-            $secondaryIPPCallsQuery = "SELECT emp_user_12, emp_id, LastName, cls_Calls.id as id, FirstName, CallDate, ResultCode, cty_id, Connected, Pitched, Positive, qualified, lds_Leads.ApptSet, lds_Leads.Issued, cls_Calls.cqd_id FROM cls_Calls LEFT JOIN clr_CallResults ON ResultCode = clr_CallResults.id LEFT JOIN emp_Employees ON emp_id = emp_Employees.id LEFT JOIN lds_Leads ON cls_Calls.lds_id = lds_Leads.id LEFT JOIN srs_SourceSubs ON lds_Leads.srs_id = srs_SourceSubs.id WHERE CallDate BETWEEN '$secondaryStart' AND '$secondaryEnd' AND ResultCode NOT IN ('*ND', 'TXT') AND Dialer = 'True' AND emp_user_12 IN ($secondaryIPPDeputyIdsList) AND cty_id = 'IPP'$excludeGspCclSql";
-            $secondaryIPPCalls = curlCall("$endpoint/lp/customReport.php?rptSQL=" . urlencode($secondaryIPPCallsQuery));
         }
 
         // STEP 5: Process secondary setters calls (already filtered by operational unit at SQL level)
@@ -1269,43 +1183,15 @@ $holidays = [
             ];
         }
 
-        // Process secondary IPP calls
-        foreach($secondaryIPPCalls as $call){
-            if(!array_key_exists(intval($call['emp_user_12']), $secondaryTimesheetEmployees)){
-                continue;
-            }
-            $employeeName = $call['FirstName'] . " " . $call['LastName'];
-            $employeeID = intval($call['emp_user_12']);
-            $secondaryTimesheetEmployees[$employeeID]['employee'] = $employeeName;
-            // Set employee name in IPP-specific hours if they have IPP hours
-            if(array_key_exists($employeeID, $secondaryIPPTimesheetEmployees)){
-                $secondaryIPPTimesheetEmployees[$employeeID]['employee'] = $employeeName;
-            }
-            $responseData['secondaryIPPCalls'][] = [
-                'id' => $call['id'],
-                'employee' => $employeeName,
-                'date' => $call['CallDate'],
-                'result' => $call['ResultCode'],
-                'cty_id' => $call['cty_id'],
-                'connected' => $call['Connected'],
-                'pitched' => $call['Pitched'],
-                'positive' => $call['Positive'],
-                'qualified' => ($call['qualified'] == 1 ? true : false),
-                'ApptSet' => $call['ApptSet'] ?? null,
-                'Issued' => $call['Issued'] ?? null,
-                'cqd_id' => $call['cqd_id'] ?? null,
-            ];
-        }
-
         foreach($secondaryGspCalls as $call){
-            if(!array_key_exists(intval($call['emp_user_12']), $secondaryTimesheetEmployees)){
+            if(!array_key_exists(intval($call['emp_user_12']), $secondaryGspTimesheetEmployees)){
                 continue;
             }
             $employeeName = $call['FirstName'] . " " . $call['LastName'];
             $employeeID = intval($call['emp_user_12']);
             $secondaryTimesheetEmployees[$employeeID]['employee'] = $employeeName;
-            if(array_key_exists($employeeID, $secondarySettersTimesheetEmployees)){
-                $secondarySettersTimesheetEmployees[$employeeID]['employee'] = $employeeName;
+            if(array_key_exists($employeeID, $secondaryGspTimesheetEmployees)){
+                $secondaryGspTimesheetEmployees[$employeeID]['employee'] = $employeeName;
             }
             $responseData['secondaryGspCalls'][] = [
                 'id' => $call['id'],
@@ -1343,41 +1229,20 @@ $holidays = [
             }
         }
         
-        // Set employee names for secondary IPP hours (in case they have hours but no calls)
-        foreach($secondaryIPPTimesheetEmployees as $empID => $empData){
+        // Set employee names for secondary GSP hours (in case they have hours but no calls)
+        foreach($secondaryGspTimesheetEmployees as $empID => $empData){
             if(!isset($empData['employee']) || empty($empData['employee'])){
-                // Try to get name from secondaryTimesheetEmployees
                 if(isset($secondaryTimesheetEmployees[$empID]['employee'])){
-                    $secondaryIPPTimesheetEmployees[$empID]['employee'] = $secondaryTimesheetEmployees[$empID]['employee'];
+                    $secondaryGspTimesheetEmployees[$empID]['employee'] = $secondaryTimesheetEmployees[$empID]['employee'];
                 } else {
-                    // Try to get name from secondary IPP calls first (most relevant)
-                    foreach($secondaryIPPCalls as $call){
+                    foreach($secondaryGspCalls as $call){
                         if(intval($call['emp_user_12']) == $empID){
-                            $secondaryIPPTimesheetEmployees[$empID]['employee'] = $call['FirstName'] . " " . $call['LastName'];
+                            $secondaryGspTimesheetEmployees[$empID]['employee'] = $call['FirstName'] . " " . $call['LastName'];
                             break;
                         }
                     }
-                    // If still not found, try secondary setters calls
-                    if(!isset($secondaryIPPTimesheetEmployees[$empID]['employee'])){
-                        foreach($secondarySettersCalls as $call){
-                            if(intval($call['emp_user_12']) == $empID){
-                                $secondaryIPPTimesheetEmployees[$empID]['employee'] = $call['FirstName'] . " " . $call['LastName'];
-                                break;
-                            }
-                        }
-                    }
-                    // If still not found, try secondary confirmers calls
-                    if(!isset($secondaryIPPTimesheetEmployees[$empID]['employee'])){
-                        foreach($secondaryConfirmersCalls as $call){
-                            if(intval($call['emp_user_12']) == $empID){
-                                $secondaryIPPTimesheetEmployees[$empID]['employee'] = $call['FirstName'] . " " . $call['LastName'];
-                                break;
-                            }
-                        }
-                    }
-                    // If still not found, try to get from secondary deputy mapping
-                    if(!isset($secondaryIPPTimesheetEmployees[$empID]['employee']) && isset($secondaryDeputyToNameMapping[$empID])){
-                        $secondaryIPPTimesheetEmployees[$empID]['employee'] = $secondaryDeputyToNameMapping[$empID];
+                    if(!isset($secondaryGspTimesheetEmployees[$empID]['employee']) && isset($secondaryDeputyToNameMapping[$empID])){
+                        $secondaryGspTimesheetEmployees[$empID]['employee'] = $secondaryDeputyToNameMapping[$empID];
                     }
                 }
             }
@@ -1386,8 +1251,7 @@ $holidays = [
         // Use setter-specific hours array (based on operational unit) for secondary setters dashboard
         $responseData['secondarySettersHours'] = array_values($secondarySettersTimesheetEmployees);
         $responseData['secondaryConfirmersHours'] = array_values($secondaryConfirmersTimesheetEmployees);
-        $responseData['secondaryIPPHours'] = array_values($secondaryIPPTimesheetEmployees);
-        $responseData['secondaryGspHours'] = [];
+        $responseData['secondaryGspHours'] = array_values($secondaryGspTimesheetEmployees);
 
         // Fetch secondary scorecards
         $secondaryQueryEndDate = date('Y-m-d', strtotime($secondaryEnd . ' -1 day'));
@@ -1515,7 +1379,7 @@ $holidays = [
                 $secondaryDeputyToLPMapping[intval($call['emp_user_12'])] = intval($call['emp_id']);
             }
         }
-        foreach($secondaryIPPCalls as $call){
+        foreach($secondaryGspCalls as $call){
             if(isset($call['emp_user_12']) && isset($call['emp_id'])){
                 $secondaryDeputyToLPMapping[intval($call['emp_user_12'])] = intval($call['emp_id']);
             }
@@ -1747,6 +1611,23 @@ $holidays = [
 
     exit(json_encode($responseData));
     
+
+    function isGspOperationalUnit($operationalUnitName){
+        if(!$operationalUnitName){
+            return false;
+        }
+        if($operationalUnitName === 'GSP' || stripos($operationalUnitName, 'GSP') !== false){
+            return true;
+        }
+        // Legacy IPP operational units (renamed to GSP in Deputy)
+        if($operationalUnitName === 'IPP' || $operationalUnitName === 'IPP Dialing - Office'){
+            return true;
+        }
+        if(stripos($operationalUnitName, 'IPP Dialing') !== false || stripos($operationalUnitName, 'IPP') !== false){
+            return true;
+        }
+        return false;
+    }
 
     function isHoliday($date){
         global $holidays;

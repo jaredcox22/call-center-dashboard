@@ -5,7 +5,7 @@ const INACTIVITY_LIMIT_MS = 8 * 60 * 60 * 1000 // 8 hours in milliseconds
 export interface FilterState {
   selectedEmployees: string[]
   timePeriod: string
-  dashboardType: 'setters' | 'confirmers' | 'ipp' | 'gsp'
+  dashboardType: 'setters' | 'confirmers' | 'gsp'
   confirmedDateRange: {
     from: string | null
     to: string | null
