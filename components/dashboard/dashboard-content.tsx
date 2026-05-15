@@ -617,14 +617,14 @@ const transformApiData = (
   // - No connection (dials): 1.2 points per dial
   // - Connected but no pitch: 1.5 points per connection
   // - Pitched but no conversion: 4 points per pitch
-  // - Conversion: 10 points per positive
-  // Formula: ((Dials - Connected) * 1.2 + ((Connected - Pitched) * 1.5) + ((Pitched - Positive) * 4) + (Positive * 10)) / Total Hours
+  // - Conversion: 10 points per positive (setters), 8 points per positive (GSP)
+  const positiveMultiplier = dashboardType === 'gsp' ? 8 : 10
   const horsepower = totalCalls > 0 && totalHours > 0
     ? Math.round(
         (((totalCalls - totalConnected) * 1.2) + 
         ((totalConnected - totalPitched) * 1.5) + 
         ((totalPitched - totalPositive) * 4) + 
-        (totalPositive * 10)) / totalHours
+        (totalPositive * positiveMultiplier)) / totalHours
       )
     : 0
   
@@ -1762,7 +1762,7 @@ export function DashboardContent() {
                     { label: "Excellent", min: 56, max: 71, color: "#22c55e" },
                     { label: "Elite", min: 72, color: "#3b82f6" },
                   ]}
-                  formula="((Dials - Connected) × 1.2 + ((Connected - Pitched) × 1.5) + ((Pitched - Positive) × 4) + (Positive × 10)) ÷ Total Hours"
+                  formula="((Dials - Connected) × 1.2 + ((Connected - Pitched) × 1.5) + ((Pitched - Positive) × 4) + (Positive × 8)) ÷ Total Hours"
                 />
                 </div>
               ) : (
