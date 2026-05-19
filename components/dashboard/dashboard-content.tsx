@@ -491,6 +491,8 @@ const transformApiData = (
     }
   })
 
+  const positiveMultiplier = dashboardType === 'gsp' ? 8 : 10
+
   // Calculate per-employee stats
   callsByEmployee.forEach((calls, employeeName) => {
     const dials = calls.length
@@ -499,13 +501,13 @@ const transformApiData = (
     const positive = calls.filter((c: any) => c.positive === 1).length
     const hours = hoursByEmployee.get(employeeName) || 0
     
-    // Calculate horsepower per employee using the same formula as team metric (only for setters)
-    const horsepower = dashboardType === 'setters' && dials > 0 && hours > 0
+    // Calculate horsepower per employee using the same formula as team metric (setters and GSP)
+    const horsepower = isSetterLikeTab(dashboardType) && dials > 0 && hours > 0
       ? Math.round(
           (((dials - connected) * 1.2) + 
           ((connected - pitched) * 1.5) + 
           ((pitched - positive) * 4) + 
-          (positive * 10)) / hours
+          (positive * positiveMultiplier)) / hours
         )
       : 0
     
@@ -618,7 +620,6 @@ const transformApiData = (
   // - Connected but no pitch: 1.5 points per connection
   // - Pitched but no conversion: 4 points per pitch
   // - Conversion: 10 points per positive (setters), 8 points per positive (GSP)
-  const positiveMultiplier = dashboardType === 'gsp' ? 8 : 10
   const horsepower = totalCalls > 0 && totalHours > 0
     ? Math.round(
         (((totalCalls - totalConnected) * 1.2) + 
@@ -2369,7 +2370,37 @@ export function DashboardContent() {
           </>
         )}
 
-        {/* Employee Indicators — GSP tab: hidden (Horsepower-only) */}
+        {/* GSP Team Members — hours and per-employee horsepower */}
+        {dashboardType === "gsp" && (
+        <div className="mt-6">
+          <h2 className="mb-3 text-xl font-semibold">{isAdmin ? "Team Members" : "Your Stats"}</h2>
+          {employees.length === 0 ? (
+            <Card className="p-8">
+              <div className="flex flex-col items-center justify-center text-center">
+                <Users className="h-12 w-12 mb-3 text-muted-foreground" />
+                <h3 className="text-lg font-medium">{isAdmin ? "No Team Members" : "No Data"}</h3>
+                <p className="text-sm text-muted-foreground mt-2">
+                  No {isAdmin ? "team member" : ""} data available for the selected period
+                </p>
+              </div>
+            </Card>
+          ) : (
+            <div className={`grid gap-3 ${isAdmin ? "md:grid-cols-2 lg:grid-cols-4" : "md:grid-cols-1 lg:grid-cols-2"}`}>
+              {employees.map((employee) => (
+                <EmployeeIndicator
+                  key={employee.id}
+                  variant="gsp"
+                  name={employee.name}
+                  hours={employee.hours}
+                  horsepower={employee.horsepower}
+                />
+              ))}
+            </div>
+          )}
+        </div>
+        )}
+
+        {/* Employee Indicators — Setters and Confirmers */}
         {dashboardType !== "gsp" && (
         <div className="mt-6">
           <h2 className="mb-3 text-xl font-semibold">{isAdmin ? "Team Members" : "Your Stats"}</h2>

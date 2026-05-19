@@ -4,15 +4,44 @@ import { Card } from "@/components/ui/card"
 
 interface EmployeeIndicatorProps {
   name: string
-  dials: number
-  connections: number
-  pitches: number
-  conversions: number
+  dials?: number
+  connections?: number
+  pitches?: number
+  conversions?: number
   hours?: number
   horsepower?: number
+  variant?: "default" | "gsp"
 }
 
-export function EmployeeIndicator({ name, dials, connections, pitches, conversions, hours, horsepower }: EmployeeIndicatorProps) {
+export function EmployeeIndicator({
+  name,
+  dials = 0,
+  connections = 0,
+  pitches = 0,
+  conversions = 0,
+  hours,
+  horsepower,
+  variant = "default",
+}: EmployeeIndicatorProps) {
+  if (variant === "gsp") {
+    return (
+      <Card className="p-4">
+        <div className="mb-3 flex items-center justify-between">
+          <h4 className="font-semibold">{name}</h4>
+        </div>
+        <div className="space-y-2">
+          <div className="flex justify-between text-sm">
+            <span className="text-muted-foreground">Hours:</span>
+            <span className="font-medium">{hours !== undefined ? hours.toFixed(1) : "0.0"}</span>
+          </div>
+          <div className="flex justify-between text-sm">
+            <span className="text-muted-foreground">Horsepower:</span>
+            <span className="font-medium">{horsepower ?? 0} HP</span>
+          </div>
+        </div>
+      </Card>
+    )
+  }
 
   return (
     <Card className="p-4">
@@ -22,7 +51,7 @@ export function EmployeeIndicator({ name, dials, connections, pitches, conversio
       <div className="space-y-2">
         <div className="flex justify-between text-sm">
           <span className="text-muted-foreground">Hours:</span>
-          <span className="font-medium">{hours !== undefined ? hours.toFixed(1) : '0.0'}</span>
+          <span className="font-medium">{hours !== undefined ? hours.toFixed(1) : "0.0"}</span>
         </div>
         <div className="flex justify-between text-sm">
           <span className="text-muted-foreground">Dials:</span>
