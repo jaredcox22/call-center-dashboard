@@ -756,38 +756,157 @@ $holidays = [
         $responseData['settersScorecards'] = [];
         $responseData['confirmersScorecards'] = [];
 
-        // Helper function to calculate max total from form_data
-        function calculateMaxTotal($formData) {
-            if(empty($formData)) return 0;
-            
-            $formDataObj = is_string($formData) ? json_decode($formData, true) : $formData;
-            if(!is_array($formDataObj) || !isset($formDataObj['fields'])) return 0;
-            
-            $maxTotal = 0;
-            foreach($formDataObj['fields'] as $field) {
-                if(isset($field['type']) && $field['type'] === 'number' && isset($field['validation']['max'])) {
-                    $maxTotal += (float)$field['validation']['max'];
+        // Helper: extract per-criterion scorecard items + aggregate score totals.
+        //
+        // actualTotal uses the LEGACY summation (sum every type:'number' value in responses)
+        // so the gauge math is bit-identical to the previous implementation, regardless of
+        // whether the per-field matching below succeeds.
+        //
+        // items[] are a best-effort drill-down. Matching tries (in order): exact key/id/name,
+        // label, then a positional queue of number-typed responses.
+        function extractScorecardItems($formData, $responses) {
+            $result = ['items' => [], 'maxTotal' => 0.0, 'actualTotal' => 0.0];
+
+            $fd = is_string($formData) ? json_decode($formData, true) : $formData;
+            $rs = is_string($responses) ? json_decode($responses, true) : $responses;
+
+            // 1) Legacy actualTotal: sum every number-typed response value, no matching required.
+            if(is_array($rs)) {
+                foreach($rs as $r) {
+                    if(is_array($r) && ($r['type'] ?? null) === 'number' && isset($r['value'])) {
+                        $result['actualTotal'] += (float)$r['value'];
+                    }
                 }
             }
-            
-            return $maxTotal;
+
+            if(!is_array($fd) || !isset($fd['fields']) || !is_array($fd['fields'])) {
+                return $result;
+            }
+
+            // 2) Build lookup tables for the items[] drill-down.
+            $byKey = [];
+            $byLabel = [];
+            $numberValueQueue = [];
+            if(is_array($rs)) {
+                foreach($rs as $outerKey => $r) {
+                    if(is_array($r)) {
+                        $candidates = [];
+                        if(is_string($outerKey)) $candidates[] = $outerKey;
+                        foreach(['key', 'id', 'name'] as $kField) {
+                            if(isset($r[$kField]) && (is_string($r[$kField]) || is_int($r[$kField]))) {
+                                $candidates[] = (string)$r[$kField];
+                            }
+                        }
+                        foreach(array_unique($candidates) as $c) {
+                            $byKey[$c] = $r;
+                        }
+                        foreach(['label', 'name', 'title'] as $lField) {
+                            if(isset($r[$lField]) && is_string($r[$lField])) {
+                                $byLabel[$r[$lField]] = $r;
+                            }
+                        }
+                        if(($r['type'] ?? null) === 'number' && array_key_exists('value', $r)) {
+                            $numberValueQueue[] = (float)$r['value'];
+                        }
+                    } elseif(is_string($outerKey)) {
+                        $byKey[$outerKey] = ['value' => $r];
+                        if(is_numeric($r)) {
+                            $numberValueQueue[] = (float)$r;
+                        }
+                    }
+                }
+            }
+
+            $queueIdx = 0;
+            foreach($fd['fields'] as $field) {
+                if(!is_array($field)) continue;
+                if(($field['type'] ?? null) !== 'number') continue;
+
+                $key   = $field['key'] ?? $field['id'] ?? $field['name'] ?? null;
+                $label = $field['label'] ?? $field['name'] ?? $field['title'] ?? $key;
+                $max   = (float)($field['validation']['max'] ?? 0);
+
+                $matched = false;
+                $value = 0.0;
+
+                // Try every plausible identifier on the form field
+                $lookupCandidates = [];
+                foreach(['key', 'id', 'name', 'label', 'title'] as $f) {
+                    if(isset($field[$f]) && (is_string($field[$f]) || is_int($field[$f]))) {
+                        $lookupCandidates[] = (string)$field[$f];
+                    }
+                }
+                foreach(array_unique($lookupCandidates) as $candidate) {
+                    if(isset($byKey[$candidate]) && array_key_exists('value', $byKey[$candidate])) {
+                        $value = (float)$byKey[$candidate]['value'];
+                        $matched = true;
+                        break;
+                    }
+                    if(isset($byLabel[$candidate]) && array_key_exists('value', $byLabel[$candidate])) {
+                        $value = (float)$byLabel[$candidate]['value'];
+                        $matched = true;
+                        break;
+                    }
+                }
+
+                // Positional fallback: consume next number-typed response value
+                if(!$matched && $queueIdx < count($numberValueQueue)) {
+                    $value = $numberValueQueue[$queueIdx];
+                    $queueIdx++;
+                }
+
+                $result['items'][] = [
+                    'key'   => $key,
+                    'label' => $label,
+                    'max'   => $max,
+                    'value' => $value,
+                    'pct'   => $max > 0 ? round(($value / $max) * 100, 2) : 0,
+                ];
+
+                $result['maxTotal'] += $max;
+            }
+
+            return $result;
         }
-        
-        // Helper function to calculate actual total from responses
-        function calculateActualTotal($responses) {
-            if(empty($responses)) return 0;
-            
-            $responsesObj = is_string($responses) ? json_decode($responses, true) : $responses;
-            if(!is_array($responsesObj)) return 0;
-            
-            $actualTotal = 0;
-            foreach($responsesObj as $field) {
-                if(isset($field['type']) && $field['type'] === 'number' && isset($field['value'])) {
-                    $actualTotal += (float)$field['value'];
+
+        // Helper: build an index of calls keyed by employee name for fast (name + time) lookups.
+        // Each entry is an array of [ts => unix_timestamp, call => raw_call_row].
+        function buildCallIndex($calls) {
+            $index = [];
+            if(!is_array($calls)) return $index;
+            foreach($calls as $call) {
+                $name = trim(($call['FirstName'] ?? '') . ' ' . ($call['LastName'] ?? ''));
+                if($name === '') continue;
+                $ts = isset($call['CallDate']) ? strtotime($call['CallDate']) : false;
+                if($ts === false) continue;
+                if(!isset($index[$name])) $index[$name] = [];
+                $index[$name][] = ['ts' => $ts, 'call' => $call];
+            }
+            return $index;
+        }
+
+        // Helper: given a call index, find the closest call to the given (employee, callDate)
+        // within $toleranceSeconds. Returns null if no match.
+        function findLinkedCall($index, $employeeName, $callDate, $toleranceSeconds = 120) {
+            if(!$employeeName || !$callDate || !isset($index[$employeeName])) return null;
+            $target = strtotime($callDate);
+            if($target === false) return null;
+            $best = null;
+            $bestDiff = $toleranceSeconds + 1;
+            foreach($index[$employeeName] as $entry) {
+                $diff = abs($entry['ts'] - $target);
+                if($diff < $bestDiff) {
+                    $bestDiff = $diff;
+                    $best = $entry['call'];
                 }
             }
-            
-            return $actualTotal;
+            if($best === null || $bestDiff > $toleranceSeconds) return null;
+            return [
+                'call_id' => $best['id'] ?? null,
+                'lds_id'  => $best['lds_id'] ?? null,
+                'cst_id'  => $best['cst_id'] ?? null,
+                'CallDate' => $best['CallDate'] ?? null,
+            ];
         }
 
         // Get employee name for lpId filtering (if lpId is provided)
@@ -800,11 +919,20 @@ $holidays = [
             }
         }
 
+        // Build (employee + CallDate) indexes for linking each scorecard back to a call/prospect.
+        // Setters can be matched against either setters calls or GSP calls (some GSP setters score on form 11).
+        $settersCallsIndex = buildCallIndex(array_merge(
+            is_array($settersCalls) ? $settersCalls : [],
+            is_array($gspCalls) ? $gspCalls : []
+        ));
+        $confirmersCallsIndex = buildCallIndex(is_array($confirmersCalls) ? $confirmersCalls : []);
+
         // Process setters scorecards
         foreach($settersScorecardsRaw as $scorecard){
             // Extract employee name from variables_used first (for filtering)
             $employeeName = null;
             $callDate = null;
+            $variables = null;
             if(isset($scorecard['variables_used'])){
                 $variables = is_string($scorecard['variables_used']) 
                     ? json_decode($scorecard['variables_used'], true) 
@@ -836,16 +964,22 @@ $holidays = [
             
             $scorecardData['callDate'] = $callDate;
             $scorecardData['employee'] = $employeeName;
-            
-            // Calculate score totals
-            $maxTotal = calculateMaxTotal($scorecard['form_data'] ?? null);
-            $actualTotal = calculateActualTotal($scorecard['responses'] ?? null);
+            $scorecardData['variables'] = is_array($variables) ? $variables : null;
+
+            $extracted = extractScorecardItems(
+                $scorecard['form_data'] ?? null,
+                $scorecard['responses'] ?? null
+            );
+            $maxTotal    = $extracted['maxTotal'];
+            $actualTotal = $extracted['actualTotal'];
             $score = $maxTotal > 0 ? round(($actualTotal / $maxTotal) * 100, 2) : 0;
-            
-            $scorecardData['maxTotal'] = $maxTotal;
+
+            $scorecardData['items']       = $extracted['items'];
+            $scorecardData['maxTotal']    = $maxTotal;
             $scorecardData['actualTotal'] = $actualTotal;
-            $scorecardData['score'] = $score;
-            
+            $scorecardData['score']       = $score;
+            $scorecardData['linkedCall']  = findLinkedCall($settersCallsIndex, $employeeName, $callDate);
+
             $responseData['settersScorecards'][] = $scorecardData;
         }
 
@@ -854,6 +988,7 @@ $holidays = [
             // Extract employee name from variables_used first (for filtering)
             $employeeName = null;
             $callDate = null;
+            $variables = null;
             if(isset($scorecard['variables_used'])){
                 $variables = is_string($scorecard['variables_used']) 
                     ? json_decode($scorecard['variables_used'], true) 
@@ -885,16 +1020,22 @@ $holidays = [
             
             $scorecardData['callDate'] = $callDate;
             $scorecardData['employee'] = $employeeName;
-            
-            // Calculate score totals
-            $maxTotal = calculateMaxTotal($scorecard['form_data'] ?? null);
-            $actualTotal = calculateActualTotal($scorecard['responses'] ?? null);
+            $scorecardData['variables'] = is_array($variables) ? $variables : null;
+
+            $extracted = extractScorecardItems(
+                $scorecard['form_data'] ?? null,
+                $scorecard['responses'] ?? null
+            );
+            $maxTotal    = $extracted['maxTotal'];
+            $actualTotal = $extracted['actualTotal'];
             $score = $maxTotal > 0 ? round(($actualTotal / $maxTotal) * 100, 2) : 0;
-            
-            $scorecardData['maxTotal'] = $maxTotal;
+
+            $scorecardData['items']       = $extracted['items'];
+            $scorecardData['maxTotal']    = $maxTotal;
             $scorecardData['actualTotal'] = $actualTotal;
-            $scorecardData['score'] = $score;
-            
+            $scorecardData['score']       = $score;
+            $scorecardData['linkedCall']  = findLinkedCall($confirmersCallsIndex, $employeeName, $callDate);
+
             $responseData['confirmersScorecards'][] = $scorecardData;
         }
 
@@ -1270,11 +1411,20 @@ $holidays = [
         
         $secondaryConfirmersScorecardsRaw = $integrityDB->query($secondaryConfirmersScorecardsQuery);
 
+        // Build (employee + CallDate) indexes for the secondary date range so each scorecard
+        // can be linked back to a specific call/prospect.
+        $secondarySettersCallsIndex = buildCallIndex(array_merge(
+            is_array($secondarySettersCalls) ? $secondarySettersCalls : [],
+            is_array($secondaryGspCalls) ? $secondaryGspCalls : []
+        ));
+        $secondaryConfirmersCallsIndex = buildCallIndex(is_array($secondaryConfirmersCalls) ? $secondaryConfirmersCalls : []);
+
         // Process secondary setters scorecards
         foreach($secondarySettersScorecardsRaw as $scorecard){
             // Extract employee name first for filtering
             $employeeName = null;
             $callDate = null;
+            $variables = null;
             if(isset($scorecard['variables_used'])){
                 $variables = is_string($scorecard['variables_used']) 
                     ? json_decode($scorecard['variables_used'], true) 
@@ -1306,15 +1456,22 @@ $holidays = [
             
             $scorecardData['callDate'] = $callDate;
             $scorecardData['employee'] = $employeeName;
-            
-            $maxTotal = calculateMaxTotal($scorecard['form_data'] ?? null);
-            $actualTotal = calculateActualTotal($scorecard['responses'] ?? null);
+            $scorecardData['variables'] = is_array($variables) ? $variables : null;
+
+            $extracted = extractScorecardItems(
+                $scorecard['form_data'] ?? null,
+                $scorecard['responses'] ?? null
+            );
+            $maxTotal    = $extracted['maxTotal'];
+            $actualTotal = $extracted['actualTotal'];
             $score = $maxTotal > 0 ? round(($actualTotal / $maxTotal) * 100, 2) : 0;
-            
-            $scorecardData['maxTotal'] = $maxTotal;
+
+            $scorecardData['items']       = $extracted['items'];
+            $scorecardData['maxTotal']    = $maxTotal;
             $scorecardData['actualTotal'] = $actualTotal;
-            $scorecardData['score'] = $score;
-            
+            $scorecardData['score']       = $score;
+            $scorecardData['linkedCall']  = findLinkedCall($secondarySettersCallsIndex, $employeeName, $callDate);
+
             $responseData['secondarySettersScorecards'][] = $scorecardData;
         }
 
@@ -1323,6 +1480,7 @@ $holidays = [
             // Extract employee name first for filtering
             $employeeName = null;
             $callDate = null;
+            $variables = null;
             if(isset($scorecard['variables_used'])){
                 $variables = is_string($scorecard['variables_used']) 
                     ? json_decode($scorecard['variables_used'], true) 
@@ -1354,15 +1512,22 @@ $holidays = [
             
             $scorecardData['callDate'] = $callDate;
             $scorecardData['employee'] = $employeeName;
-            
-            $maxTotal = calculateMaxTotal($scorecard['form_data'] ?? null);
-            $actualTotal = calculateActualTotal($scorecard['responses'] ?? null);
+            $scorecardData['variables'] = is_array($variables) ? $variables : null;
+
+            $extracted = extractScorecardItems(
+                $scorecard['form_data'] ?? null,
+                $scorecard['responses'] ?? null
+            );
+            $maxTotal    = $extracted['maxTotal'];
+            $actualTotal = $extracted['actualTotal'];
             $score = $maxTotal > 0 ? round(($actualTotal / $maxTotal) * 100, 2) : 0;
-            
-            $scorecardData['maxTotal'] = $maxTotal;
+
+            $scorecardData['items']       = $extracted['items'];
+            $scorecardData['maxTotal']    = $maxTotal;
             $scorecardData['actualTotal'] = $actualTotal;
-            $scorecardData['score'] = $score;
-            
+            $scorecardData['score']       = $score;
+            $scorecardData['linkedCall']  = findLinkedCall($secondaryConfirmersCallsIndex, $employeeName, $callDate);
+
             $responseData['secondaryConfirmersScorecards'][] = $scorecardData;
         }
 

@@ -20,6 +20,7 @@ import { DialsPerHourDataTable } from "./dials-per-hour-data-table"
 import { ConversionQualifiedDataTable } from "./conversion-qualified-data-table"
 import { ConversionUnqualifiedDataTable } from "./conversion-unqualified-data-table"
 import { GrossIssueDataTable } from "./gross-issue-data-table"
+import { ScorecardDataTable, type ScorecardRecord } from "./scorecard-data-table"
 import { ExcludedRecordsPanel } from "./excluded-records-panel"
 import { useExcludedRecords } from "@/hooks/use-excluded-records"
 import { RefreshCw, Moon, Sun, CalendarIcon, AlertCircle, ChevronDown, Users } from "lucide-react"
@@ -734,6 +735,7 @@ export function DashboardContent() {
   const [conversionQualifiedTableOpen, setConversionQualifiedTableOpen] = useState(false)
   const [conversionUnqualifiedTableOpen, setConversionUnqualifiedTableOpen] = useState(false)
   const [grossIssueTableOpen, setGrossIssueTableOpen] = useState(false)
+  const [scorecardTableOpen, setScorecardTableOpen] = useState(false)
   const [excludedRecordsPanelOpen, setExcludedRecordsPanelOpen] = useState(false)
   
   // Excluded records hook - syncs with Firestore
@@ -1209,6 +1211,38 @@ export function DashboardContent() {
   const filteredSecondaryGrossIssueAppointments = selectedEmployees.length > 0
     ? allSecondaryGrossIssueAppointments.filter((apt: any) => selectedEmployees.includes(apt.employee))
     : allSecondaryGrossIssueAppointments
+
+  // Build the scorecard data table source. Setters use the secondary (performance window)
+  // bucket because the Setters Scorecard gauge lives in the secondary block; Confirmers use
+  // the primary bucket because the Scorecard gauge is a primary metric there.
+  const scorecardTableData: ScorecardRecord[] = (() => {
+    if (!rawData) return []
+    const sourceKey =
+      dashboardType === 'confirmers'
+        ? 'confirmersScorecards'
+        : dashboardType === 'setters'
+          ? 'secondarySettersScorecards'
+          : null
+    if (!sourceKey) return []
+    const list: any[] = rawData[sourceKey] || []
+    const filtered = selectedEmployees.length > 0
+      ? list.filter((sc: any) => selectedEmployees.includes(sc.employee))
+      : list
+    return filtered.map((sc: any) => ({
+      id: sc.id ?? null,
+      form_instance_id: sc.form_instance_id ?? sc.id ?? null,
+      form_id: sc.form_id ?? null,
+      status: sc.status ?? null,
+      callDate: sc.callDate ?? null,
+      employee: sc.employee ?? null,
+      maxTotal: Number(sc.maxTotal ?? 0),
+      actualTotal: Number(sc.actualTotal ?? 0),
+      score: Number(sc.score ?? 0),
+      items: Array.isArray(sc.items) ? sc.items : [],
+      variables: sc.variables ?? null,
+      linkedCall: sc.linkedCall ?? null,
+    }))
+  })()
 
   // Transform all calls for connection and dials per hour data tables
   const connectionTableData = filteredAllCalls.map((call: any) => ({
@@ -2202,6 +2236,8 @@ export function DashboardContent() {
                           { label: "Elite", min: 90, max: 100, color: "#3b82f6" },
                         ]}
                         formula="(Sum of actualTotals ÷ Sum of maxTotals) × 100"
+                        showDataIcon={true}
+                        onViewData={() => setScorecardTableOpen(true)}
                       />
                       <CircularGauge
                         title="Conversion % (Qualified)"
@@ -2364,6 +2400,9 @@ export function DashboardContent() {
                   { label: "Excellent", min: 80, max: 89.9, color: "#22c55e" },
                   { label: "Elite", min: 90, max: 100, color: "#3b82f6" },
                 ]}
+                formula="(Sum of actualTotals ÷ Sum of maxTotals) × 100"
+                showDataIcon={true}
+                onViewData={() => setScorecardTableOpen(true)}
               />
             </div>
             )}
@@ -2514,6 +2553,17 @@ export function DashboardContent() {
             selectedEmployees={selectedEmployees}
           />
         </>
+      )}
+
+      {/* Scorecard Data Table Dialog - available on both Setters (secondary) and Confirmers tabs */}
+      {rawData && (dashboardType === 'setters' || dashboardType === 'confirmers') && (
+        <ScorecardDataTable
+          data={scorecardTableData}
+          open={scorecardTableOpen}
+          onOpenChange={setScorecardTableOpen}
+          title={dashboardType === 'confirmers' ? 'Confirmers Scorecard - Data Table' : 'Setters Scorecard - Data Table'}
+          variant={dashboardType === 'confirmers' ? 'confirmers' : 'setters'}
+        />
       )}
 
       {/* Excluded Records Panel - Admin Only */}
