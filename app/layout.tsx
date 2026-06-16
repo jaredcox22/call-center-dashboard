@@ -12,8 +12,7 @@ const _geistMono = Geist_Mono({ subsets: ["latin"] })
 
 export const metadata: Metadata = {
   title: "Call Center Dashboard",
-  description: "Live sales performance metrics",
-  generator: "v0.app",
+  description: "Live sales performance metrics for call center teams",
 }
 
 export default function RootLayout({

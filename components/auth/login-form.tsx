@@ -18,7 +18,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog"
 import { useToast } from "@/hooks/use-toast"
-import Link from "next/link"
+import { demoCredentials } from "@/lib/demo-user"
 
 export function LoginForm() {
   const [email, setEmail] = useState("")
@@ -27,6 +27,7 @@ export function LoginForm() {
   const [forgotPasswordOpen, setForgotPasswordOpen] = useState(false)
   const [resetEmail, setResetEmail] = useState("")
   const [isResetting, setIsResetting] = useState(false)
+  const [isDemoLoading, setIsDemoLoading] = useState(false)
   const { signIn, sendPasswordReset } = useAuth()
   const router = useRouter()
   const { toast } = useToast()
@@ -79,8 +80,28 @@ export function LoginForm() {
     }
   }
 
+  const handleDemoLogin = async () => {
+    const { email, password } = demoCredentials()
+    setIsDemoLoading(true)
+
+    try {
+      await signIn(email, password)
+      router.push("/dashboard")
+    } catch {
+      toast({
+        title: "Error",
+        description: "Unable to sign in with demo credentials",
+        variant: "destructive",
+      })
+    } finally {
+      setIsDemoLoading(false)
+    }
+  }
+
+  const { email: demoEmail, password: demoPassword } = demoCredentials()
+
   return (
-    <>
+    <div className="flex w-full max-w-md flex-col gap-4">
       <Card className="w-full max-w-md">
         <CardHeader>
           <CardTitle className="text-2xl">Sign In</CardTitle>
@@ -125,6 +146,27 @@ export function LoginForm() {
         </CardContent>
       </Card>
 
+      <Card className="w-full">
+        <CardHeader className="pb-3">
+          <CardTitle className="text-lg">Demo</CardTitle>
+          <CardDescription>Explore the dashboard with sample data only.</CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-3">
+          <Button
+            type="button"
+            variant="secondary"
+            className="w-full"
+            onClick={handleDemoLogin}
+            disabled={isDemoLoading || isLoading}
+          >
+            {isDemoLoading ? "Signing in..." : "Sign in as Demo User"}
+          </Button>
+          <p className="text-center text-xs text-muted-foreground">
+            {demoEmail} / {demoPassword}
+          </p>
+        </CardContent>
+      </Card>
+
       <Dialog open={forgotPasswordOpen} onOpenChange={setForgotPasswordOpen}>
         <DialogContent>
           <DialogHeader>
@@ -156,6 +198,6 @@ export function LoginForm() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
-    </>
+    </div>
   )
 }

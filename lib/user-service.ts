@@ -21,7 +21,7 @@ export interface UserData {
   firstName: string
   lastName: string
   lpId: number | null
-  role: "admin" | "agent"
+  role: "admin" | "agent" | "demo"
   createdAt: Timestamp
   updatedAt: Timestamp
 }
@@ -31,7 +31,7 @@ export interface CreateUserData {
   firstName: string
   lastName: string
   lpId: number | null
-  role: "admin" | "agent"
+  role: "admin" | "agent" | "demo"
   password: string
 }
 

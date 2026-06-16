@@ -37,7 +37,7 @@ export function UserFormDialog({ open, onOpenChange, user, onSaved }: UserFormDi
   const [lastName, setLastName] = useState("")
   const [email, setEmail] = useState("")
   const [lpId, setLpId] = useState<string>("")
-  const [role, setRole] = useState<"admin" | "agent">("agent")
+  const [role, setRole] = useState<"admin" | "agent" | "demo">("agent")
   const [password, setPassword] = useState("")
   const [isLoading, setIsLoading] = useState(false)
   const { toast } = useToast()
@@ -236,13 +236,14 @@ export function UserFormDialog({ open, onOpenChange, user, onSaved }: UserFormDi
           </div>
           <div className="space-y-2">
             <Label htmlFor="role">Role *</Label>
-            <Select value={role} onValueChange={(value: "admin" | "agent") => setRole(value)}>
+            <Select value={role} onValueChange={(value: "admin" | "agent" | "demo") => setRole(value)}>
               <SelectTrigger>
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="agent">Agent</SelectItem>
                 <SelectItem value="admin">Admin</SelectItem>
+                <SelectItem value="demo">Demo</SelectItem>
               </SelectContent>
             </Select>
           </div>

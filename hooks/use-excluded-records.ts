@@ -7,13 +7,16 @@ import {
   deleteDoc,
   doc,
   onSnapshot,
-  query,
-  where,
   Timestamp,
   writeBatch,
 } from "firebase/firestore"
 import { db } from "@/lib/firebase"
 import { useAuth } from "@/contexts/auth-context"
+import {
+  loadDemoExcludedRecords,
+  saveDemoExcludedRecords,
+  type StoredDemoExcludedRecord,
+} from "@/lib/demo-excluded-records"
 
 // Table types that support exclusion
 export type ExcludableTableType =
@@ -42,16 +45,50 @@ interface ExcludedRecordsState {
   error: Error | null
 }
 
+function toExcludedRecord(stored: StoredDemoExcludedRecord): ExcludedRecord {
+  return {
+    id: stored.id,
+    tableType: stored.tableType,
+    recordId: stored.recordId,
+    excludedAt: Timestamp.fromMillis(stored.excludedAtMs),
+    excludedBy: stored.excludedBy,
+  }
+}
+
+function toStoredRecord(record: ExcludedRecord): StoredDemoExcludedRecord {
+  return {
+    id: record.id,
+    tableType: record.tableType,
+    recordId: record.recordId,
+    excludedAtMs: record.excludedAt.toMillis(),
+    excludedBy: record.excludedBy,
+  }
+}
+
 export function useExcludedRecords() {
-  const { user } = useAuth()
+  const { user, isDemoUser } = useAuth()
   const [state, setState] = useState<ExcludedRecordsState>({
     records: [],
     loading: true,
     error: null,
   })
 
+  const loadDemoRecords = useCallback(() => {
+    const records = loadDemoExcludedRecords().map(toExcludedRecord)
+    setState({
+      records,
+      loading: false,
+      error: null,
+    })
+  }, [])
+
   // Subscribe to excluded records collection
   useEffect(() => {
+    if (isDemoUser) {
+      loadDemoRecords()
+      return
+    }
+
     const excludedRecordsRef = collection(db, "excludedRecords")
 
     const unsubscribe = onSnapshot(
@@ -81,6 +118,15 @@ export function useExcludedRecords() {
     )
 
     return () => unsubscribe()
+  }, [isDemoUser, loadDemoRecords])
+
+  const persistDemoRecords = useCallback((records: ExcludedRecord[]) => {
+    saveDemoExcludedRecords(records.map(toStoredRecord))
+    setState({
+      records,
+      loading: false,
+      error: null,
+    })
   }, [])
 
   // Get excluded records for a specific table type
@@ -121,11 +167,26 @@ export function useExcludedRecords() {
         throw new Error("User must be authenticated to exclude records")
       }
 
+      if (isDemoUser) {
+        const next = [...state.records]
+        for (const recordId of recordIds) {
+          if (isExcluded(tableType, recordId)) continue
+          next.push({
+            id: `demo-${crypto.randomUUID()}`,
+            tableType,
+            recordId,
+            excludedAt: Timestamp.now(),
+            excludedBy: user.email,
+          })
+        }
+        persistDemoRecords(next)
+        return
+      }
+
       const batch = writeBatch(db)
       const excludedRecordsRef = collection(db, "excludedRecords")
 
       for (const recordId of recordIds) {
-        // Skip if already excluded
         if (isExcluded(tableType, recordId)) continue
 
         const docRef = doc(excludedRecordsRef)
@@ -139,33 +200,30 @@ export function useExcludedRecords() {
 
       await batch.commit()
     },
-    [user?.email, isExcluded]
+    [user?.email, isExcluded, isDemoUser, state.records, persistDemoRecords]
   )
 
   // Exclude a single record
   const excludeRecord = useCallback(
     async (tableType: ExcludableTableType, recordId: string) => {
-      if (!user?.email) {
-        throw new Error("User must be authenticated to exclude records")
-      }
-
-      // Skip if already excluded
-      if (isExcluded(tableType, recordId)) return
-
-      const excludedRecordsRef = collection(db, "excludedRecords")
-      await addDoc(excludedRecordsRef, {
-        tableType,
-        recordId,
-        excludedAt: Timestamp.now(),
-        excludedBy: user.email,
-      })
+      await excludeRecords(tableType, [recordId])
     },
-    [user?.email, isExcluded]
+    [excludeRecords]
   )
 
   // Restore multiple records (bulk operation)
   const restoreRecords = useCallback(
     async (tableType: ExcludableTableType, recordIds: string[]) => {
+      if (isDemoUser) {
+        const ids = new Set(recordIds)
+        persistDemoRecords(
+          state.records.filter(
+            (record) => !(record.tableType === tableType && ids.has(record.recordId))
+          )
+        )
+        return
+      }
+
       const batch = writeBatch(db)
 
       for (const recordId of recordIds) {
@@ -180,40 +238,51 @@ export function useExcludedRecords() {
 
       await batch.commit()
     },
-    [state.records]
+    [state.records, isDemoUser, persistDemoRecords]
   )
 
   // Restore a single record
   const restoreRecord = useCallback(
     async (tableType: ExcludableTableType, recordId: string) => {
-      const record = state.records.find(
-        (r) => r.tableType === tableType && r.recordId === recordId
-      )
-      if (record) {
-        const docRef = doc(db, "excludedRecords", record.id)
-        await deleteDoc(docRef)
-      }
+      await restoreRecords(tableType, [recordId])
     },
-    [state.records]
+    [restoreRecords]
   )
 
   // Restore by Firestore document ID (for use in the panel)
-  const restoreByDocId = useCallback(async (docId: string) => {
-    const docRef = doc(db, "excludedRecords", docId)
-    await deleteDoc(docRef)
-  }, [])
+  const restoreByDocId = useCallback(
+    async (docId: string) => {
+      if (isDemoUser) {
+        persistDemoRecords(state.records.filter((record) => record.id !== docId))
+        return
+      }
+
+      const docRef = doc(db, "excludedRecords", docId)
+      await deleteDoc(docRef)
+    },
+    [isDemoUser, state.records, persistDemoRecords]
+  )
 
   // Bulk restore by Firestore document IDs
-  const restoreByDocIds = useCallback(async (docIds: string[]) => {
-    const batch = writeBatch(db)
+  const restoreByDocIds = useCallback(
+    async (docIds: string[]) => {
+      if (isDemoUser) {
+        const ids = new Set(docIds)
+        persistDemoRecords(state.records.filter((record) => !ids.has(record.id)))
+        return
+      }
 
-    for (const docId of docIds) {
-      const docRef = doc(db, "excludedRecords", docId)
-      batch.delete(docRef)
-    }
+      const batch = writeBatch(db)
 
-    await batch.commit()
-  }, [])
+      for (const docId of docIds) {
+        const docRef = doc(db, "excludedRecords", docId)
+        batch.delete(docRef)
+      }
+
+      await batch.commit()
+    },
+    [isDemoUser, state.records, persistDemoRecords]
+  )
 
   // Memoized grouped records by table type (for the panel)
   const recordsByTableType = useMemo(() => {
@@ -257,5 +326,3 @@ export function useExcludedRecords() {
     restoreByDocIds,
   }
 }
-
-

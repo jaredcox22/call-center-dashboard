@@ -4,6 +4,7 @@ import { useState, useEffect } from "react"
 import { useRouter } from "next/navigation"
 import { useAuth } from "@/contexts/auth-context"
 import { getAllUsers, deleteUser, sendPasswordReset, type UserData } from "@/lib/user-service"
+import { getDemoUsers } from "@/lib/demo-data/demo-users"
 import { Button } from "@/components/ui/button"
 import {
   Table,
@@ -35,7 +36,7 @@ interface UserWithUid extends UserData {
 
 export function UserManagement() {
   const router = useRouter()
-  const { user: currentUser } = useAuth()
+  const { user: currentUser, isDemoUser } = useAuth()
   const [users, setUsers] = useState<UserWithUid[]>([])
   const [loading, setLoading] = useState(true)
   const [userFormOpen, setUserFormOpen] = useState(false)
@@ -48,6 +49,10 @@ export function UserManagement() {
   const loadUsers = async () => {
     try {
       setLoading(true)
+      if (isDemoUser) {
+        setUsers(getDemoUsers(currentUser?.uid))
+        return
+      }
       const allUsers = await getAllUsers()
       setUsers(allUsers.map((u) => ({ ...u.data, uid: u.uid })))
     } catch (error) {
@@ -63,19 +68,38 @@ export function UserManagement() {
 
   useEffect(() => {
     loadUsers()
-  }, [])
+  }, [isDemoUser, currentUser?.uid])
+
+  const showDemoActionToast = () => {
+    toast({
+      title: "Demo mode",
+      description: "User changes are disabled while using the demo account.",
+    })
+  }
 
   const handleAddUser = () => {
+    if (isDemoUser) {
+      showDemoActionToast()
+      return
+    }
     setEditingUser(null)
     setUserFormOpen(true)
   }
 
   const handleEditUser = (user: UserWithUid) => {
+    if (isDemoUser) {
+      showDemoActionToast()
+      return
+    }
     setEditingUser(user)
     setUserFormOpen(true)
   }
 
   const handleDeleteClick = (user: UserWithUid) => {
+    if (isDemoUser) {
+      showDemoActionToast()
+      return
+    }
     setUserToDelete(user)
     setDeleteDialogOpen(true)
   }
@@ -119,6 +143,11 @@ export function UserManagement() {
   }
 
   const handleSendPasswordReset = async (email: string) => {
+    if (isDemoUser) {
+      showDemoActionToast()
+      return
+    }
+
     try {
       await sendPasswordReset(email)
       toast({
@@ -155,14 +184,24 @@ export function UserManagement() {
             </Button>
             <h1 className="text-3xl font-bold">User Management</h1>
             <p className="text-muted-foreground mt-2">
-              Manage users, roles, and access permissions
+              {isDemoUser
+                ? "Sample users for the demo account. Changes are not saved."
+                : "Manage users, roles, and access permissions"}
             </p>
           </div>
-          <Button onClick={handleAddUser}>
-            <Plus className="mr-2 h-4 w-4" />
-            Add User
-          </Button>
+          {!isDemoUser && (
+            <Button onClick={handleAddUser}>
+              <Plus className="mr-2 h-4 w-4" />
+              Add User
+            </Button>
+          )}
         </div>
+
+        {isDemoUser && (
+          <div className="mb-4 rounded-md border border-amber-500/30 bg-amber-500/10 px-4 py-2 text-sm text-amber-900 dark:text-amber-200">
+            Demo account — user list uses sample data only.
+          </div>
+        )}
 
         <Card>
           <CardHeader>
@@ -200,12 +239,23 @@ export function UserManagement() {
                       <TableCell>{user.email}</TableCell>
                       <TableCell>{user.lpId ?? "N/A"}</TableCell>
                       <TableCell>
-                        <Badge variant={user.role === "admin" ? "default" : "secondary"}>
+                        <Badge
+                          variant={
+                            user.role === "admin"
+                              ? "default"
+                              : user.role === "demo"
+                                ? "outline"
+                                : "secondary"
+                          }
+                        >
                           {user.role}
                         </Badge>
                       </TableCell>
                       <TableCell className="text-right">
-                        <div className="flex justify-end gap-2">
+                        {isDemoUser ? (
+                          <span className="text-xs text-muted-foreground">View only</span>
+                        ) : (
+                          <div className="flex justify-end gap-2">
                           <Button
                             variant="ghost"
                             size="sm"
@@ -233,6 +283,7 @@ export function UserManagement() {
                             <Trash2 className="h-4 w-4" />
                           </Button>
                         </div>
+                        )}
                       </TableCell>
                     </TableRow>
                   ))}

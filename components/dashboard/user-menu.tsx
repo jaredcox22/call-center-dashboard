@@ -33,7 +33,7 @@ interface UserMenuProps {
 }
 
 export function UserMenu({ onExcludedRecordsClick, excludedRecordsCount = 0 }: UserMenuProps) {
-  const { user, isAdmin, logout } = useAuth()
+  const { user, isAdmin, isDemoUser, hasAdminMenu, logout } = useAuth()
   const router = useRouter()
   const [changePasswordOpen, setChangePasswordOpen] = useState(false)
   const [showLogoutDialog, setShowLogoutDialog] = useState(false)
@@ -90,11 +90,13 @@ export function UserMenu({ onExcludedRecordsClick, excludedRecordsCount = 0 }: U
             </div>
           </DropdownMenuLabel>
           <DropdownMenuSeparator />
-          <DropdownMenuItem onClick={handleChangePassword}>
-            <Key className="mr-2 h-4 w-4" />
-            <span>Change Password</span>
-          </DropdownMenuItem>
-          {isAdmin && (
+          {!isDemoUser && (
+            <DropdownMenuItem onClick={handleChangePassword}>
+              <Key className="mr-2 h-4 w-4" />
+              <span>Change Password</span>
+            </DropdownMenuItem>
+          )}
+          {hasAdminMenu && (
             <>
               <DropdownMenuSeparator />
               <DropdownMenuItem onClick={onExcludedRecordsClick}>

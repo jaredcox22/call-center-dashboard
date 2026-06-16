@@ -40,6 +40,7 @@ import { useActivityTracker } from "@/hooks/use-activity-tracker"
 import { SessionWarning } from "@/components/session-warning"
 import { LoadingScreen } from "./loading-screen"
 import { FilterStorage, FilterState } from "@/lib/filter-storage"
+import { DemoBanner } from "./demo-banner"
 import useSWR from "swr"
 import { format } from "date-fns"
 
@@ -314,9 +315,12 @@ const buildApiUrl = (
   customRange?: { from: Date | undefined; to?: Date | undefined },
   secondaryDateRange?: string,
   secondaryCustomRange?: { from: Date | undefined; to?: Date | undefined },
-  lpId?: number | null
+  lpId?: number | null,
+  useDemoData?: boolean
 ) => {
-  const baseUrl = 'https://api.integrityprodserver.com/dashboards/ccHorsepowerTest.php'
+  const baseUrl = useDemoData
+    ? "/api/demo/dashboard"
+    : "https://api.integrityprodserver.com/dashboards/ccHorsepowerTest.php"
   const params = new URLSearchParams({ dateRange })
   
   if (dateRange === 'Custom Dates' && customRange?.from && customRange?.to) {
@@ -708,7 +712,8 @@ const transformApiData = (
 }
 
 export function DashboardContent() {
-  const { user, logout, isAdmin, isAgent, lpId } = useAuth()
+  const { user, logout, isAdmin, isAgent, isDemoUser, hasTeamView, lpId } = useAuth()
+  const canExcludeRecords = isAdmin || isDemoUser
   const { theme, toggleTheme } = useTheme()
   const router = useRouter()
   const [timePeriod, setTimePeriod] = useState("Today")
@@ -790,8 +795,8 @@ export function DashboardContent() {
     const stored = FilterStorage.loadFilters()
     if (stored) {
       const deserialized = deserializeFilterState(stored)
-      // Only load selectedEmployees for admins
-      if (isAdmin) {
+      // Only load selectedEmployees for admins and demo users
+      if (hasTeamView) {
         setSelectedEmployees(deserialized.selectedEmployees)
       } else {
         setSelectedEmployees([])
@@ -807,13 +812,13 @@ export function DashboardContent() {
       setSelectedCallBucketsUnqualified(deserialized.selectedCallBucketsUnqualified ?? [])
     } else {
       // If no stored filters, ensure agents have empty selectedEmployees
-      if (!isAdmin) {
+      if (!hasTeamView) {
         setSelectedEmployees([])
       }
     }
     setFiltersLoaded(true)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isAdmin]) // Re-run when admin status changes
+  }, [hasTeamView]) // Re-run when team view access changes
 
   // Only build API URL if we have complete date range for custom dates
   // For agents, pass their LP ID to filter data; for admins, don't pass LP ID (get all data)
@@ -825,7 +830,7 @@ export function DashboardContent() {
       return null // Don't fetch until secondary dates are confirmed with Ok button
     }
     const agentLpId = isAgent ? lpId : null
-    return buildApiUrl(timePeriod, confirmedDateRange, secondaryTimePeriod || 'Rolling 30 Days', secondaryConfirmedDateRange, agentLpId)
+    return buildApiUrl(timePeriod, confirmedDateRange, secondaryTimePeriod || 'Rolling 30 Days', secondaryConfirmedDateRange, agentLpId, isDemoUser)
   })()
 
   const { data: rawData, error, mutate } = useSWR(apiUrl, fetcher, {
@@ -870,7 +875,7 @@ export function DashboardContent() {
   // Auto-select dashboard tab based on available data (only for agents, and only on initial load)
   const [hasAutoSelectedTab, setHasAutoSelectedTab] = useState(false)
   useEffect(() => {
-    if (!rawData || hasAutoSelectedTab || isAdmin) return
+    if (!rawData || hasAutoSelectedTab || hasTeamView) return
     
     const hasSettersData = (rawData.settersCalls?.length > 0) || (rawData.settersHours?.length > 0)
     const hasGspData = (rawData.gspCalls?.length > 0) || (rawData.gspHours?.length > 0)
@@ -886,7 +891,7 @@ export function DashboardContent() {
     }
     
     setHasAutoSelectedTab(true)
-  }, [rawData, hasAutoSelectedTab, isAdmin])
+  }, [rawData, hasAutoSelectedTab, hasTeamView])
 
   // Get unique employees from the appropriate calls array or hours array based on dashboard type
   const availableEmployees = rawData ? (() => {
@@ -1398,6 +1403,7 @@ export function DashboardContent() {
     <div className="min-h-screen bg-background">
       {/* Session Warning */}
       <SessionWarning />
+      {isDemoUser && <DemoBanner />}
       
       {/* Header */}
       <header className="sticky top-0 z-50 border-b border-border bg-card/95 backdrop-blur supports-backdrop-filter:bg-card/80">
@@ -1583,7 +1589,7 @@ export function DashboardContent() {
                   </PopoverContent>
                 </Popover>
               )}
-              {isAdmin && (
+              {hasTeamView && (
                 <Popover open={employeeSelectOpen} onOpenChange={setEmployeeSelectOpen}>
                   <PopoverTrigger asChild>
                     <Button variant="outline" className="h-9 dark:border-white/10 bg-white dark:bg-transparent w-[140px] justify-between font-normal">
@@ -2412,19 +2418,19 @@ export function DashboardContent() {
         {/* GSP Team Members — hours and per-employee horsepower */}
         {dashboardType === "gsp" && (
         <div className="mt-6">
-          <h2 className="mb-3 text-xl font-semibold">{isAdmin ? "Team Members" : "Your Stats"}</h2>
+          <h2 className="mb-3 text-xl font-semibold">{hasTeamView ? "Team Members" : "Your Stats"}</h2>
           {employees.length === 0 ? (
             <Card className="p-8">
               <div className="flex flex-col items-center justify-center text-center">
                 <Users className="h-12 w-12 mb-3 text-muted-foreground" />
-                <h3 className="text-lg font-medium">{isAdmin ? "No Team Members" : "No Data"}</h3>
+                <h3 className="text-lg font-medium">{hasTeamView ? "No Team Members" : "No Data"}</h3>
                 <p className="text-sm text-muted-foreground mt-2">
-                  No {isAdmin ? "team member" : ""} data available for the selected period
+                  No {hasTeamView ? "team member" : ""} data available for the selected period
                 </p>
               </div>
             </Card>
           ) : (
-            <div className={`grid gap-3 ${isAdmin ? "md:grid-cols-2 lg:grid-cols-4" : "md:grid-cols-1 lg:grid-cols-2"}`}>
+            <div className={`grid gap-3 ${hasTeamView ? "md:grid-cols-2 lg:grid-cols-4" : "md:grid-cols-1 lg:grid-cols-2"}`}>
               {employees.map((employee) => (
                 <EmployeeIndicator
                   key={employee.id}
@@ -2442,19 +2448,19 @@ export function DashboardContent() {
         {/* Employee Indicators — Setters and Confirmers */}
         {dashboardType !== "gsp" && (
         <div className="mt-6">
-          <h2 className="mb-3 text-xl font-semibold">{isAdmin ? "Team Members" : "Your Stats"}</h2>
+          <h2 className="mb-3 text-xl font-semibold">{hasTeamView ? "Team Members" : "Your Stats"}</h2>
           {employees.length === 0 ? (
             <Card className="p-8">
               <div className="flex flex-col items-center justify-center text-center">
                 <Users className="h-12 w-12 mb-3 text-muted-foreground" />
-                <h3 className="text-lg font-medium">{isAdmin ? "No Team Members" : "No Data"}</h3>
+                <h3 className="text-lg font-medium">{hasTeamView ? "No Team Members" : "No Data"}</h3>
                 <p className="text-sm text-muted-foreground mt-2">
-                  No {isAdmin ? "team member" : ""} data available for the selected period
+                  No {hasTeamView ? "team member" : ""} data available for the selected period
                 </p>
               </div>
             </Card>
           ) : (
-            <div className={`grid gap-3 ${isAdmin ? "md:grid-cols-2 lg:grid-cols-4" : "md:grid-cols-1 lg:grid-cols-2"}`}>
+            <div className={`grid gap-3 ${hasTeamView ? "md:grid-cols-2 lg:grid-cols-4" : "md:grid-cols-1 lg:grid-cols-2"}`}>
               {employees.map((employee) => (
                 <EmployeeIndicator
                   key={employee.id}
@@ -2484,7 +2490,7 @@ export function DashboardContent() {
             open={stlTableOpen}
             onOpenChange={setStlTableOpen}
             excludedIds={getExcludedIdsForTable("stl")}
-            onExcludeRecords={isAdmin ? ((ids) => excludeRecords("stl", ids)) : undefined}
+            onExcludeRecords={canExcludeRecords ? ((ids) => excludeRecords("stl", ids)) : undefined}
           />
         </>
       )}
@@ -2497,21 +2503,21 @@ export function DashboardContent() {
             open={conversionTableOpen}
             onOpenChange={setConversionTableOpen}
             excludedIds={getExcludedIdsForTable("conversion")}
-            onExcludeRecords={isAdmin ? ((ids) => excludeRecords("conversion", ids)) : undefined}
+            onExcludeRecords={canExcludeRecords ? ((ids) => excludeRecords("conversion", ids)) : undefined}
           />
           <PitchDataTable
             data={filteredConnectedCalls}
             open={pitchTableOpen}
             onOpenChange={setPitchTableOpen}
             excludedIds={getExcludedIdsForTable("pitch")}
-            onExcludeRecords={isAdmin ? ((ids) => excludeRecords("pitch", ids)) : undefined}
+            onExcludeRecords={canExcludeRecords ? ((ids) => excludeRecords("pitch", ids)) : undefined}
           />
           <ConnectionDataTable
             data={connectionTableData}
             open={connectionTableOpen}
             onOpenChange={setConnectionTableOpen}
             excludedIds={getExcludedIdsForTable("connection")}
-            onExcludeRecords={isAdmin ? ((ids) => excludeRecords("connection", ids)) : undefined}
+            onExcludeRecords={canExcludeRecords ? ((ids) => excludeRecords("connection", ids)) : undefined}
           />
           <DialsPerHourDataTable
             data={dialsPerHourTableData}
@@ -2519,14 +2525,14 @@ export function DashboardContent() {
             open={dialsPerHourTableOpen}
             onOpenChange={setDialsPerHourTableOpen}
             excludedIds={getExcludedIdsForTable("dialsPerHour")}
-            onExcludeRecords={isAdmin ? ((ids) => excludeRecords("dialsPerHour", ids)) : undefined}
+            onExcludeRecords={canExcludeRecords ? ((ids) => excludeRecords("dialsPerHour", ids)) : undefined}
           />
           <ConversionQualifiedDataTable
             data={filteredSecondaryPitchedCallsForQualified}
             open={conversionQualifiedTableOpen}
             onOpenChange={setConversionQualifiedTableOpen}
             excludedIds={getExcludedIdsForTable("conversionQualified")}
-            onExcludeRecords={isAdmin ? ((ids) => excludeRecords("conversionQualified", ids)) : undefined}
+            onExcludeRecords={canExcludeRecords ? ((ids) => excludeRecords("conversionQualified", ids)) : undefined}
             callQueueDetails={rawData?.callQueueDetails ?? []}
             selectedCallBuckets={selectedCallBucketsQualified}
             onSelectedCallBucketsChange={setSelectedCallBucketsQualified}
@@ -2536,7 +2542,7 @@ export function DashboardContent() {
             open={conversionUnqualifiedTableOpen}
             onOpenChange={setConversionUnqualifiedTableOpen}
             excludedIds={getExcludedIdsForTable("conversionUnqualified")}
-            onExcludeRecords={isAdmin ? ((ids) => excludeRecords("conversionUnqualified", ids)) : undefined}
+            onExcludeRecords={canExcludeRecords ? ((ids) => excludeRecords("conversionUnqualified", ids)) : undefined}
             callQueueDetails={rawData?.callQueueDetails ?? []}
             selectedCallBuckets={selectedCallBucketsUnqualified}
             onSelectedCallBucketsChange={setSelectedCallBucketsUnqualified}
@@ -2546,7 +2552,7 @@ export function DashboardContent() {
             open={grossIssueTableOpen}
             onOpenChange={setGrossIssueTableOpen}
             excludedIds={getExcludedIdsForTable("grossIssue")}
-            onExcludeRecords={isAdmin ? ((ids) => excludeRecords("grossIssue", ids)) : undefined}
+            onExcludeRecords={canExcludeRecords ? ((ids) => excludeRecords("grossIssue", ids)) : undefined}
             timePeriod={secondaryTimePeriod}
             dateRange={secondaryConfirmedDateRange}
             timeRange={secondaryConfirmedTimeRange}
@@ -2567,7 +2573,7 @@ export function DashboardContent() {
       )}
 
       {/* Excluded Records Panel - Admin Only */}
-      {isAdmin && (
+      {canExcludeRecords && (
         <ExcludedRecordsPanel
           open={excludedRecordsPanelOpen}
           onOpenChange={setExcludedRecordsPanelOpen}

@@ -12,7 +12,7 @@ interface ProtectedRouteProps {
 }
 
 export function ProtectedRoute({ children, adminOnly = false }: ProtectedRouteProps) {
-  const { user, loading, userDataLoading, isAdmin, userData } = useAuth()
+  const { user, loading, userDataLoading, isAdmin, isDemoUser, userData } = useAuth()
   const router = useRouter()
 
   useEffect(() => {
@@ -23,10 +23,10 @@ export function ProtectedRoute({ children, adminOnly = false }: ProtectedRoutePr
     }
 
     // Only redirect admin-only routes after user data is loaded
-    if (!loading && !userDataLoading && user && adminOnly && !isAdmin) {
+    if (!loading && !userDataLoading && user && adminOnly && !isAdmin && !isDemoUser) {
       router.push("/dashboard")
     }
-  }, [user, loading, userDataLoading, router, adminOnly, isAdmin])
+  }, [user, loading, userDataLoading, router, adminOnly, isAdmin, isDemoUser])
 
   // Show loading while auth or user data is loading
   if (loading || userDataLoading) {
@@ -42,7 +42,7 @@ export function ProtectedRoute({ children, adminOnly = false }: ProtectedRoutePr
   }
 
   // Wait for user data before rendering admin-only routes
-  if (adminOnly && !isAdmin) {
+  if (adminOnly && !isAdmin && !isDemoUser) {
     return null
   }
 

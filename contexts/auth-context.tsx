@@ -17,6 +17,7 @@ import {
 import { auth } from "@/lib/firebase"
 import { SessionManager } from "@/lib/session-manager"
 import { getUserData, type UserData, sendPasswordReset } from "@/lib/user-service"
+import { isDemoEmail, isDemoRole } from "@/lib/demo-user"
 
 interface AuthContextType {
   user: User | null
@@ -25,6 +26,9 @@ interface AuthContextType {
   userDataLoading: boolean
   isAdmin: boolean
   isAgent: boolean
+  isDemoUser: boolean
+  hasTeamView: boolean
+  hasAdminMenu: boolean
   lpId: number | null
   signIn: (email: string, password: string) => Promise<void>
   signUp: (email: string, password: string) => Promise<void>
@@ -130,6 +134,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const isAdmin = userData?.role === "admin"
   const isAgent = userData?.role === "agent"
+  const isDemoUser =
+    isDemoRole(userData?.role) || isDemoEmail(user?.email ?? userData?.email)
+  const hasTeamView = isAdmin || isDemoUser
+  const hasAdminMenu = isAdmin || isDemoUser
   const lpId = userData?.lpId ?? null
 
   const value = {
@@ -139,6 +147,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     userDataLoading,
     isAdmin,
     isAgent,
+    isDemoUser,
+    hasTeamView,
+    hasAdminMenu,
     lpId,
     signIn,
     signUp,
