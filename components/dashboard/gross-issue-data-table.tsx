@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useMemo, useEffect, useCallback, useRef } from "react"
+import { useState, useMemo, useEffect, useCallback, useRef, type ReactNode } from "react"
 import {
   Dialog,
   DialogContent,
@@ -17,7 +17,7 @@ import {
   TableRow,
 } from "@/components/ui/table"
 import { Input } from "@/components/ui/input"
-import { ArrowUpDown, ArrowUp, ArrowDown, Info, ChevronDown, ChevronLeft, ChevronRight, ExternalLink, Calendar, Clock, User } from "lucide-react"
+import { ArrowUpDown, ArrowUp, ArrowDown, Info, ChevronDown, ChevronLeft, ChevronRight, ExternalLink, Calendar, Clock, User, Package, Radio, Tags } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { format } from "date-fns"
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
@@ -62,20 +62,115 @@ const formatHourTo12Hour = (hour: number): string => {
   return `${hour - 12} PM`
 }
 
+const EMPTY_FILTER_VALUE = "(None)"
+
 /**
- * Formats the employee selection text for display
+ * Formats multi-select filter selection text for display
  */
-const formatEmployeeSelectionText = (selectedEmployees: string[]): string => {
-  if (selectedEmployees.length === 0) {
-    return "All Employees"
+const formatSelectionText = (selected: string[], allLabel: string): string => {
+  if (selected.length === 0) {
+    return allLabel
   }
-  if (selectedEmployees.length === 1) {
-    return selectedEmployees[0]
+  if (selected.length === 1) {
+    return selected[0]
   }
-  if (selectedEmployees.length === 2) {
-    return `${selectedEmployees[0]}, ${selectedEmployees[1]}`
+  if (selected.length === 2) {
+    return `${selected[0]}, ${selected[1]}`
   }
-  return `${selectedEmployees.length} selected`
+  return `${selected.length} selected`
+}
+
+const toFilterValue = (value: string | number | null | undefined): string => {
+  if (value == null || String(value).trim() === "") {
+    return EMPTY_FILTER_VALUE
+  }
+  return String(value)
+}
+
+interface MultiSelectFilterProps {
+  label: string
+  allLabel: string
+  options: string[]
+  selected: string[]
+  onSelectedChange: (selected: string[]) => void
+  open: boolean
+  onOpenChange: (open: boolean) => void
+  icon?: ReactNode
+  widthClassName?: string
+}
+
+function MultiSelectFilter({
+  label,
+  allLabel,
+  options,
+  selected,
+  onSelectedChange,
+  open,
+  onOpenChange,
+  icon,
+  widthClassName = "w-full sm:w-[180px]",
+}: MultiSelectFilterProps) {
+  return (
+    <Popover open={open} onOpenChange={onOpenChange}>
+      <PopoverTrigger asChild>
+        <Button variant="outline" className={`${widthClassName} justify-between font-normal`}>
+          {icon}
+          <span className="truncate text-left flex-1">{formatSelectionText(selected, allLabel)}</span>
+          <ChevronDown className="h-4 w-4 opacity-50 shrink-0 ml-2" />
+        </Button>
+      </PopoverTrigger>
+      <PopoverContent className="w-[220px] p-0" align="end">
+        <div className="p-2 max-h-[300px] overflow-auto">
+          <div className="px-2 py-1 text-xs text-muted-foreground font-medium">{label}</div>
+          <div className="flex items-center space-x-2 p-2 hover:bg-accent rounded-sm">
+            <Checkbox
+              checked={selected.length === 0}
+              onCheckedChange={(checked) => {
+                if (checked) {
+                  onSelectedChange([])
+                }
+              }}
+            />
+            <label
+              className="text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70 cursor-pointer flex-1"
+              onClick={() => onSelectedChange([])}
+            >
+              {allLabel}
+            </label>
+          </div>
+          {options.map((option) => (
+            <div
+              key={option}
+              className="flex items-center space-x-2 p-2 hover:bg-accent rounded-sm"
+            >
+              <Checkbox
+                checked={selected.includes(option)}
+                onCheckedChange={(checked) => {
+                  if (checked) {
+                    onSelectedChange([...selected, option])
+                  } else {
+                    onSelectedChange(selected.filter((item) => item !== option))
+                  }
+                }}
+              />
+              <label
+                className="text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70 cursor-pointer flex-1"
+                onClick={() => {
+                  if (selected.includes(option)) {
+                    onSelectedChange(selected.filter((item) => item !== option))
+                  } else {
+                    onSelectedChange([...selected, option])
+                  }
+                }}
+              >
+                {option}
+              </label>
+            </div>
+          ))}
+        </div>
+      </PopoverContent>
+    </Popover>
+  )
 }
 
 interface GrossIssueRecord {
@@ -88,6 +183,9 @@ interface GrossIssueRecord {
   lds_id?: number | null
   cst_id?: number | null
   dsp_id?: number | null
+  Productid?: string | number | null
+  SourceCode?: string | null
+  Descr?: string | null
 }
 
 interface TimeRange {
@@ -112,7 +210,7 @@ interface GrossIssueDataTableProps {
   selectedEmployees?: string[] // Sync with main dashboard employee filter
 }
 
-type SortField = "employee" | "date" | "ApptSet" | "Issued" | "NetIssued" | "lds_id" | "cst_id" | "dsp_id"
+type SortField = "employee" | "date" | "ApptSet" | "Issued" | "NetIssued" | "lds_id" | "cst_id" | "dsp_id" | "Productid" | "SourceCode" | "Descr"
 type SortDirection = "asc" | "desc" | null
 
 export function GrossIssueDataTable({ 
@@ -134,6 +232,12 @@ export function GrossIssueDataTable({
   const [selectedRows, setSelectedRows] = useState<Set<string>>(new Set())
   const [selectedEmployees, setSelectedEmployees] = useState<string[]>(propSelectedEmployees)
   const [employeeSelectOpen, setEmployeeSelectOpen] = useState(false)
+  const [selectedProducts, setSelectedProducts] = useState<string[]>([])
+  const [productSelectOpen, setProductSelectOpen] = useState(false)
+  const [selectedSources, setSelectedSources] = useState<string[]>([])
+  const [sourceSelectOpen, setSourceSelectOpen] = useState(false)
+  const [selectedSubSources, setSelectedSubSources] = useState<string[]>([])
+  const [subSourceSelectOpen, setSubSourceSelectOpen] = useState(false)
   const itemsPerPage = 50 // Render only 50 rows at a time to prevent blocking
 
   // Get unique employees from data for the filter
@@ -146,6 +250,42 @@ export function GrossIssueDataTable({
     })
     return Array.from(employees).sort((a, b) => a.localeCompare(b))
   }, [data])
+
+  const uniqueProducts = useMemo(() => {
+    const products = new Set<string>()
+    data.forEach((record) => {
+      products.add(toFilterValue(record.Productid))
+    })
+    return Array.from(products).sort((a, b) => a.localeCompare(b, undefined, { numeric: true }))
+  }, [data])
+
+  const uniqueSources = useMemo(() => {
+    const sources = new Set<string>()
+    data.forEach((record) => {
+      sources.add(toFilterValue(record.SourceCode))
+    })
+    return Array.from(sources).sort((a, b) => a.localeCompare(b))
+  }, [data])
+
+  const uniqueSubSources = useMemo(() => {
+    const subSources = new Set<string>()
+    data.forEach((record) => {
+      const source = toFilterValue(record.SourceCode)
+      if (selectedSources.length === 0 || selectedSources.includes(source)) {
+        subSources.add(toFilterValue(record.Descr))
+      }
+    })
+    return Array.from(subSources).sort((a, b) => a.localeCompare(b))
+  }, [data, selectedSources])
+
+  // Drop sub-source selections that are no longer available for the selected source(s)
+  useEffect(() => {
+    setSelectedSubSources((prev) => {
+      if (prev.length === 0) return prev
+      const next = prev.filter((subSource) => uniqueSubSources.includes(subSource))
+      return next.length === prev.length ? prev : next
+    })
+  }, [uniqueSubSources])
 
   // Track previous open state to detect when dialog transitions from closed to open
   const prevOpenRef = useRef(open)
@@ -188,14 +328,26 @@ export function GrossIssueDataTable({
     return record.id?.toString() ?? ""
   }
 
-  // Filter to only calls where ApptSet > 0, not excluded, and matching employee filter
+  // Filter to only appointments where ApptSet > 0, not excluded, and matching filters
   const apptSetData = useMemo(() => {
     return data.filter((record) => {
       const recordId = getRecordId(record)
       const matchesEmployee = selectedEmployees.length === 0 || selectedEmployees.includes(record.employee)
-      return record.ApptSet != null && record.ApptSet > 0 && recordId && !excludedIds.has(recordId) && matchesEmployee
+      const matchesProduct = selectedProducts.length === 0 || selectedProducts.includes(toFilterValue(record.Productid))
+      const matchesSource = selectedSources.length === 0 || selectedSources.includes(toFilterValue(record.SourceCode))
+      const matchesSubSource = selectedSubSources.length === 0 || selectedSubSources.includes(toFilterValue(record.Descr))
+      return (
+        record.ApptSet != null &&
+        record.ApptSet > 0 &&
+        recordId &&
+        !excludedIds.has(recordId) &&
+        matchesEmployee &&
+        matchesProduct &&
+        matchesSource &&
+        matchesSubSource
+      )
     })
-  }, [data, excludedIds, selectedEmployees])
+  }, [data, excludedIds, selectedEmployees, selectedProducts, selectedSources, selectedSubSources])
 
   // Pre-compute formatted dates to avoid calling formatDate during rendering
   const formattedDates = useMemo(() => {
@@ -243,6 +395,9 @@ export function GrossIssueDataTable({
         (record.lds_id?.toString() ?? "").includes(query) ||
         (record.cst_id?.toString() ?? "").includes(query) ||
         (record.dsp_id?.toString() ?? "").includes(query) ||
+        (record.Productid?.toString() ?? "").toLowerCase().includes(query) ||
+        (record.SourceCode?.toString() ?? "").toLowerCase().includes(query) ||
+        (record.Descr?.toString() ?? "").toLowerCase().includes(query) ||
         (record.NetIssued?.toString() ?? "").includes(query) ||
         formattedDate.toLowerCase().includes(query) ||
         (record.Issued != null && record.Issued > 0 ? "yes" : "no").includes(query)
@@ -280,10 +435,10 @@ export function GrossIssueDataTable({
     return filtered
   }, [apptSetData, searchQuery, sortField, sortDirection, formattedDates])
 
-  // Reset to page 1 when search, sort, or employee filter changes
+  // Reset to page 1 when search, sort, or filters change
   useEffect(() => {
     setCurrentPage(1)
-  }, [searchQuery, sortField, sortDirection, selectedEmployees])
+  }, [searchQuery, sortField, sortDirection, selectedEmployees, selectedProducts, selectedSources, selectedSubSources])
 
   // Clear selection when dialog closes (but keep employee filter synced with main dashboard)
   const handleOpenChange = useCallback((newOpen: boolean) => {
@@ -445,7 +600,25 @@ export function GrossIssueDataTable({
               {selectedEmployees.length > 0 && (
                 <Badge variant="secondary" className="flex items-center gap-1">
                   <User className="h-3 w-3" />
-                  {formatEmployeeSelectionText(selectedEmployees)}
+                  {formatSelectionText(selectedEmployees, "All Employees")}
+                </Badge>
+              )}
+              {selectedProducts.length > 0 && (
+                <Badge variant="secondary" className="flex items-center gap-1">
+                  <Package className="h-3 w-3" />
+                  {formatSelectionText(selectedProducts, "All Products")}
+                </Badge>
+              )}
+              {selectedSources.length > 0 && (
+                <Badge variant="secondary" className="flex items-center gap-1">
+                  <Radio className="h-3 w-3" />
+                  {formatSelectionText(selectedSources, "All Sources")}
+                </Badge>
+              )}
+              {selectedSubSources.length > 0 && (
+                <Badge variant="secondary" className="flex items-center gap-1">
+                  <Tags className="h-3 w-3" />
+                  {formatSelectionText(selectedSubSources, "All Sub Sources")}
                 </Badge>
               )}
             </div>
@@ -509,75 +682,59 @@ export function GrossIssueDataTable({
             </Alert>
           </Collapsible>
 
-          {/* Search Input, Employee Filter, and Actions */}
+          {/* Search Input, Filters, and Actions */}
           <div className="flex flex-col gap-2">
-            <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
+            <div className="flex flex-col gap-2">
               <Input
-                placeholder="Search by employee, date, lead ID, customer ID, Disposition, or issue status..."
+                placeholder="Search by employee, date, lead ID, customer ID, Disposition, product, source, or issue status..."
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
-                className="flex-1"
+                className="w-full"
               />
-              <Popover open={employeeSelectOpen} onOpenChange={setEmployeeSelectOpen}>
-                <PopoverTrigger asChild>
-                  <Button variant="outline" className="w-full sm:w-[200px] justify-between font-normal">
-                    <User className="h-4 w-4 mr-2 shrink-0" />
-                    <span className="truncate text-left flex-1">{formatEmployeeSelectionText(selectedEmployees)}</span>
-                    <ChevronDown className="h-4 w-4 opacity-50 shrink-0 ml-2" />
-                  </Button>
-                </PopoverTrigger>
-                <PopoverContent className="w-[200px] p-0" align="end">
-                  <div className="p-2 max-h-[300px] overflow-auto">
-                    <div className="flex items-center space-x-2 p-2 hover:bg-accent rounded-sm">
-                      <Checkbox
-                        checked={selectedEmployees.length === 0}
-                        onCheckedChange={(checked) => {
-                          if (checked) {
-                            setSelectedEmployees([])
-                          }
-                        }}
-                      />
-                      <label 
-                        className="text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70 cursor-pointer flex-1"
-                        onClick={() => {
-                          setSelectedEmployees([])
-                        }}
-                      >
-                        All Employees
-                      </label>
-                    </div>
-                    {uniqueEmployees.map((employeeName) => (
-                      <div
-                        key={employeeName}
-                        className="flex items-center space-x-2 p-2 hover:bg-accent rounded-sm"
-                      >
-                        <Checkbox
-                          checked={selectedEmployees.includes(employeeName)}
-                          onCheckedChange={(checked) => {
-                            if (checked) {
-                              setSelectedEmployees([...selectedEmployees, employeeName])
-                            } else {
-                              setSelectedEmployees(selectedEmployees.filter(emp => emp !== employeeName))
-                            }
-                          }}
-                        />
-                        <label 
-                          className="text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70 cursor-pointer flex-1"
-                          onClick={() => {
-                            if (selectedEmployees.includes(employeeName)) {
-                              setSelectedEmployees(selectedEmployees.filter(emp => emp !== employeeName))
-                            } else {
-                              setSelectedEmployees([...selectedEmployees, employeeName])
-                            }
-                          }}
-                        >
-                          {employeeName}
-                        </label>
-                      </div>
-                    ))}
-                  </div>
-                </PopoverContent>
-              </Popover>
+              <div className="flex flex-col sm:flex-row sm:flex-wrap items-stretch sm:items-center gap-2">
+                <MultiSelectFilter
+                  label="Employee"
+                  allLabel="All Employees"
+                  options={uniqueEmployees}
+                  selected={selectedEmployees}
+                  onSelectedChange={setSelectedEmployees}
+                  open={employeeSelectOpen}
+                  onOpenChange={setEmployeeSelectOpen}
+                  icon={<User className="h-4 w-4 mr-2 shrink-0" />}
+                  widthClassName="w-full sm:w-[200px]"
+                />
+                <MultiSelectFilter
+                  label="Product"
+                  allLabel="All Products"
+                  options={uniqueProducts}
+                  selected={selectedProducts}
+                  onSelectedChange={setSelectedProducts}
+                  open={productSelectOpen}
+                  onOpenChange={setProductSelectOpen}
+                  icon={<Package className="h-4 w-4 mr-2 shrink-0" />}
+                />
+                <MultiSelectFilter
+                  label="Source"
+                  allLabel="All Sources"
+                  options={uniqueSources}
+                  selected={selectedSources}
+                  onSelectedChange={setSelectedSources}
+                  open={sourceSelectOpen}
+                  onOpenChange={setSourceSelectOpen}
+                  icon={<Radio className="h-4 w-4 mr-2 shrink-0" />}
+                />
+                <MultiSelectFilter
+                  label="Sub Source"
+                  allLabel="All Sub Sources"
+                  options={uniqueSubSources}
+                  selected={selectedSubSources}
+                  onSelectedChange={setSelectedSubSources}
+                  open={subSourceSelectOpen}
+                  onOpenChange={setSubSourceSelectOpen}
+                  icon={<Tags className="h-4 w-4 mr-2 shrink-0" />}
+                  widthClassName="w-full sm:w-[200px]"
+                />
+              </div>
             </div>
             <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-2">
               <div className="text-sm text-muted-foreground whitespace-nowrap text-center sm:text-left">
@@ -682,6 +839,39 @@ export function GrossIssueDataTable({
                       {getSortIcon("dsp_id")}
                     </Button>
                   </TableHead>
+                  <TableHead className="w-[100px] hidden md:table-cell">
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="h-8 -ml-2"
+                      onClick={() => handleSort("Productid")}
+                    >
+                      Product ID
+                      {getSortIcon("Productid")}
+                    </Button>
+                  </TableHead>
+                  <TableHead className="w-[110px] hidden md:table-cell">
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="h-8 -ml-2"
+                      onClick={() => handleSort("SourceCode")}
+                    >
+                      Source
+                      {getSortIcon("SourceCode")}
+                    </Button>
+                  </TableHead>
+                  <TableHead className="min-w-[140px] hidden lg:table-cell">
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="h-8 -ml-2"
+                      onClick={() => handleSort("Descr")}
+                    >
+                      Sub Source
+                      {getSortIcon("Descr")}
+                    </Button>
+                  </TableHead>
                   {onExcludeRecords && (
                     <TableHead className="w-[50px]">Actions</TableHead>
                   )}
@@ -690,7 +880,7 @@ export function GrossIssueDataTable({
               <TableBody>
                 {filteredAndSortedData.length === 0 ? (
                   <TableRow>
-                    <TableCell colSpan={onExcludeRecords ? 9 : 7} className="text-center py-8 text-muted-foreground">
+                    <TableCell colSpan={onExcludeRecords ? 12 : 10} className="text-center py-8 text-muted-foreground">
                       {searchQuery ? "No records found matching your search." : "No data available."}
                     </TableCell>
                   </TableRow>
@@ -751,6 +941,15 @@ export function GrossIssueDataTable({
                         </TableCell>
                         <TableCell className="text-sm text-muted-foreground hidden sm:table-cell">
                           {record.dsp_id ?? "N/A"}
+                        </TableCell>
+                        <TableCell className="text-sm text-muted-foreground hidden md:table-cell">
+                          {record.Productid ?? "N/A"}
+                        </TableCell>
+                        <TableCell className="text-sm text-muted-foreground hidden md:table-cell">
+                          {record.SourceCode ?? "N/A"}
+                        </TableCell>
+                        <TableCell className="text-sm text-muted-foreground hidden lg:table-cell">
+                          {record.Descr ?? "N/A"}
                         </TableCell>
                         {onExcludeRecords && (
                           <TableCell>

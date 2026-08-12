@@ -61,6 +61,164 @@ $holidays = [
     require_once(__DIR__ . "/../../shared/sharedFunctions.php");
     require_once(__DIR__ . "/../../shared/db.php");
 
+    // Match AppointmentsFiltered: one appointment per lead per calendar day (highest id wins)
+    if (!function_exists('filterLatestAppointmentPerLeadPerDay')) {
+        function filterLatestAppointmentPerLeadPerDay($appointments) {
+            if (!is_array($appointments)) {
+                return [];
+            }
+            $bestByLeadDay = [];
+            foreach ($appointments as $appointment) {
+                if (!is_array($appointment)) {
+                    continue;
+                }
+                $id = isset($appointment['id']) ? intval($appointment['id']) : 0;
+                $ldsId = $appointment['lds_id'] ?? $appointment['Lds_ID'] ?? $appointment['Lds_id'] ?? '';
+                $apptDate = $appointment['ApptDate'] ?? $appointment['apptdate'] ?? '';
+                if ($ldsId === '' || $ldsId === null || $apptDate === '' || $apptDate === null) {
+                    $key = 'id:' . $id;
+                } else {
+                    $dayTs = strtotime($apptDate);
+                    $day = $dayTs ? date('Y-m-d', $dayTs) : (string)$apptDate;
+                    $key = $ldsId . '|' . $day;
+                }
+                if (!isset($bestByLeadDay[$key]) || intval($bestByLeadDay[$key]['id'] ?? 0) < $id) {
+                    $bestByLeadDay[$key] = $appointment;
+                }
+            }
+            return array_values($bestByLeadDay);
+        }
+    }
+
+    // Load dsp_dispositions keyed by descr (same approach as LeadProg → data sync)
+    if (!function_exists('loadDispositionsByDescr')) {
+        function loadDispositionsByDescr($endpoint) {
+            $query = "SELECT * FROM dsp_dispositions ORDER BY id DESC";
+            $rows = curlCall("$endpoint/lp/customReport.php?rptSQL=" . urlencode($query));
+            if (!is_array($rows)) {
+                return [];
+            }
+            $dispositions = [];
+            foreach ($rows as $dispo) {
+                if (!is_array($dispo)) {
+                    continue;
+                }
+                foreach ($dispo as $key => $value) {
+                    if (strtolower($key) != $key) {
+                        $dispo[strtolower($key)] = $value;
+                        unset($dispo[$key]);
+                    }
+                }
+                if (!isset($dispo['descr'])) {
+                    continue;
+                }
+                // Trim: SQL Server CHAR columns often return padded values (e.g. "CXL            ")
+                $descr = trim((string)$dispo['descr']);
+                if ($descr === '') {
+                    continue;
+                }
+                $dispositions[$descr] = $dispo;
+            }
+            return $dispositions;
+        }
+    }
+
+    // Truthy check matching LeadProg sync's `$dispo[$flag] > 0`, plus API bool/string variants
+    if (!function_exists('dispositionFlagIsSet')) {
+        function dispositionFlagIsSet($value) {
+            if (is_bool($value)) {
+                return $value;
+            }
+            if (is_numeric($value)) {
+                return floatval($value) > 0;
+            }
+            if (is_string($value)) {
+                $normalized = strtolower(trim($value));
+                if ($normalized === '') {
+                    return false;
+                }
+                if (in_array($normalized, ['1', 'true', 'yes', 'y'], true)) {
+                    return true;
+                }
+                if (is_numeric($normalized)) {
+                    return floatval($normalized) > 0;
+                }
+            }
+            return false;
+        }
+    }
+
+    // Look up disposition by dsp id, tolerating CHAR padding on either side
+    if (!function_exists('findDispositionByDspId')) {
+        function findDispositionByDspId($dspId, $dispositions) {
+            $dspId = trim((string)$dspId);
+            if ($dspId === '' || !is_array($dispositions)) {
+                return null;
+            }
+            if (isset($dispositions[$dspId])) {
+                return $dispositions[$dspId];
+            }
+            foreach ($dispositions as $key => $dispo) {
+                if (trim((string)$key) === $dspId) {
+                    return $dispo;
+                }
+            }
+            return null;
+        }
+    }
+
+    // Determine ApptSet from disposition (mirrors LeadProg sync script logic)
+    if (!function_exists('isAppointmentSetFromDisposition')) {
+        function isAppointmentSetFromDisposition($appointment, $dispositions) {
+            if (!is_array($appointment) || !is_array($dispositions)) {
+                return false;
+            }
+            $dspId = $appointment['Dsp_ID'] ?? $appointment['dsp_id'] ?? '';
+            $dispo = findDispositionByDspId($dspId, $dispositions);
+            if ($dispo === null) {
+                return false;
+            }
+            $dctId = intval($dispo['dct_id'] ?? 0);
+            $setBy = intval($appointment['SetBy'] ?? $appointment['setby'] ?? 0);
+
+            // dct_id 1–4 cascade: issued+ implies appointment set
+            if ($dctId >= 1) {
+                return true;
+            }
+
+            // dct_id 0: use disposition setappt flag, but require a real SetBy
+            // (same as sync: setappt > 0, then force false when setby == 0)
+            if (dispositionFlagIsSet($dispo['setappt'] ?? 0) && $setBy != 0) {
+                return true;
+            }
+
+            return false;
+        }
+    }
+
+    // Keep only appointments considered set by disposition; normalize ApptSet to 1/0 for the UI
+    if (!function_exists('filterAppointmentsSetByDisposition')) {
+        function filterAppointmentsSetByDisposition($appointments, $dispositions) {
+            if (!is_array($appointments)) {
+                return [];
+            }
+            $filtered = [];
+            foreach ($appointments as $appointment) {
+                if (!is_array($appointment)) {
+                    continue;
+                }
+                $isSet = isAppointmentSetFromDisposition($appointment, $dispositions);
+                $appointment['ApptSet'] = $isSet ? 1 : 0;
+                if ($isSet) {
+                    $filtered[] = $appointment;
+                }
+            }
+            return $filtered;
+        }
+    }
+
+    $dispositions = [];
+
     $start = date('Y-m-d');
     $end = date('Y-m-d', strtotime("tomorrow"));
 
@@ -273,7 +431,7 @@ $holidays = [
                 }
                 
                 // Determine if this timesheet is for a setter, confirmer, or GSP based on operational unit
-                $isSetterOperationalUnit = $operationalUnitName === 'Setter';
+                $isSetterOperationalUnit = isSetterOperationalUnit($operationalUnitName);
                 $isConfirmerOperationalUnit = $operationalUnitName && (
                     $operationalUnitName === 'Confirmer' || 
                     $operationalUnitName === 'Confirmer - Office' ||
@@ -351,7 +509,7 @@ $holidays = [
             
             if(isset($deputyIDOperationalUnits[$deputyID])){
                 foreach($deputyIDOperationalUnits[$deputyID] as $unitName){
-                    if($unitName === 'Setter'){
+                    if(isSetterOperationalUnit($unitName)){
                         $hasSetterUnit = true;
                     }
                     if($unitName === 'Confirmer' || $unitName === 'Confirmer - Office' || stripos($unitName, 'Confirmer') !== false){
@@ -630,8 +788,15 @@ $holidays = [
                 (in_array('Confirmer - Office', $operationalUnits) || 
                  in_array('Confirmer', $operationalUnits) ||
                  preg_match('/confirmer/i', implode(' ', $operationalUnits)));
-            $isSetterByOperationalUnit = !empty($operationalUnits) && 
-                in_array('Setter', $operationalUnits);
+            $isSetterByOperationalUnit = false;
+            if(!empty($operationalUnits)){
+                foreach($operationalUnits as $unitName){
+                    if(isSetterOperationalUnit($unitName)){
+                        $isSetterByOperationalUnit = true;
+                        break;
+                    }
+                }
+            }
             
             $issue = 'OK';
             if($isConfirmerByOperationalUnit && !$isSetterByOperationalUnit){
@@ -1050,11 +1215,21 @@ $holidays = [
         
         // Fetch appointments for setters (for gross issue calculation)
         // Only include appointments where SetBy is an employee in settersDeputyIDs array
+        // ApptSet is determined from disposition (not the ApptSet column), matching LeadProg sync
         $settersAppointments = [];
         if(!empty($setterLPEmployeeIds)){
+            if (empty($dispositions)) {
+                $dispositions = loadDispositionsByDescr($endpoint);
+            }
             $setterLPEmployeeIdsList = implode(',', $setterLPEmployeeIds);
-            $settersAppointmentsQuery = "SELECT app_Appointments.id, app_Appointments.lds_id, app_Appointments.cst_id, app_Appointments.ApptDate, app_Appointments.Dsp_ID, app_Appointments.SetBy, app_Appointments.ApptSet, app_Appointments.Issued, app_Appointments.NetIssued, emp_Employees.FirstName, emp_Employees.LastName FROM app_Appointments LEFT JOIN emp_Employees ON app_Appointments.SetBy = emp_Employees.id WHERE app_Appointments.ApptDate BETWEEN '$start' AND '$end' AND emp_Employees.Dialer = '1' AND Dsp_ID NOT IN ('Set') AND ApptSet = '1' AND app_Appointments.SetBy IN ($setterLPEmployeeIdsList) ORDER BY app_Appointments.id DESC";
+            $settersAppointmentsQuery = "SELECT app_Appointments.id, app_Appointments.lds_id, app_Appointments.cst_id, app_Appointments.ApptDate, app_Appointments.Dsp_ID, app_Appointments.SetBy, app_Appointments.ApptSet, app_Appointments.Issued, app_Appointments.NetIssued, emp_Employees.FirstName, emp_Employees.LastName FROM app_Appointments LEFT JOIN emp_Employees ON app_Appointments.SetBy = emp_Employees.id WHERE app_Appointments.ApptDate BETWEEN '$start' AND '$end' AND emp_Employees.Dialer = '1' AND Dsp_ID NOT IN ('Set') AND app_Appointments.SetBy IN ($setterLPEmployeeIdsList) ORDER BY app_Appointments.id DESC";
             $settersAppointments = curlCall("$endpoint/lp/customReport.php?rptSQL=" . urlencode($settersAppointmentsQuery));
+            if(!is_array($settersAppointments)){
+                $settersAppointments = [];
+            }
+            // Disposition-based ApptSet filter, then drop older/duplicate same-day appointments for the same lead
+            $settersAppointments = filterAppointmentsSetByDisposition($settersAppointments, $dispositions);
+            $settersAppointments = filterLatestAppointmentPerLeadPerDay($settersAppointments);
         }
         
         // Format appointments data
@@ -1145,7 +1320,7 @@ $holidays = [
                     }
                 }
                 
-                $isSetterOperationalUnit = $operationalUnitName === 'Setter';
+                $isSetterOperationalUnit = isSetterOperationalUnit($operationalUnitName);
                 $isConfirmerOperationalUnit = $operationalUnitName && (
                     $operationalUnitName === 'Confirmer' || 
                     $operationalUnitName === 'Confirmer - Office' ||
@@ -1212,7 +1387,7 @@ $holidays = [
             
             if(isset($secondaryDeputyIDOperationalUnits[$deputyID])){
                 foreach($secondaryDeputyIDOperationalUnits[$deputyID] as $unitName){
-                    if($unitName === 'Setter'){
+                    if(isSetterOperationalUnit($unitName)){
                         $hasSetterUnit = true;
                     }
                     if($unitName === 'Confirmer' || $unitName === 'Confirmer - Office' || stripos($unitName, 'Confirmer') !== false){
@@ -1561,11 +1736,32 @@ $holidays = [
         
         // Fetch secondary appointments for setters (for gross issue calculation)
         // Only include appointments where SetBy is an employee in secondarySettersDeputyIDs array
+        // ApptSet is determined from disposition (not the ApptSet column), matching LeadProg sync
         $secondarySettersAppointments = [];
         if(!empty($secondarySetterLPEmployeeIds)){
+            if (empty($dispositions)) {
+                $dispositions = loadDispositionsByDescr($endpoint);
+            }
             $secondarySetterLPEmployeeIdsList = implode(',', $secondarySetterLPEmployeeIds);
-            $secondarySettersAppointmentsQuery = "SELECT app_Appointments.id, app_Appointments.lds_id, app_Appointments.cst_id, app_Appointments.ApptDate, app_Appointments.Dsp_ID, app_Appointments.SetBy, app_Appointments.ApptSet, app_Appointments.Issued, app_Appointments.NetIssued, emp_Employees.FirstName, emp_Employees.LastName FROM app_Appointments LEFT JOIN emp_Employees ON app_Appointments.SetBy = emp_Employees.id WHERE app_Appointments.ApptDate BETWEEN '$secondaryStart' AND '$secondaryEnd' AND CAST(app_Appointments.ApptDate AS date) <= CAST(GETDATE() AS date) AND emp_Employees.Dialer = '1' AND ApptSet = '1' AND app_Appointments.SetBy IN ($secondarySetterLPEmployeeIdsList) ORDER BY app_Appointments.id DESC";
+            $secondarySettersAppointmentsQuery = "SELECT app_Appointments.id, app_Appointments.lds_id, app_Appointments.cst_id, 
+            app_Appointments.ApptDate, app_Appointments.Dsp_ID, app_Appointments.SetBy, app_Appointments.ApptSet, 
+            app_Appointments.Issued, app_Appointments.NetIssued, emp_Employees.FirstName, emp_Employees.LastName, Lds_Leads.Productid, srs_SourceSubs.SourceCode, srs_SourceSubs.Descr
+            FROM app_Appointments 
+            LEFT JOIN emp_Employees ON app_Appointments.SetBy = emp_Employees.id 
+            LEFT JOIN Lds_Leads ON app_Appointments.Lds_ID = Lds_Leads.id
+            LEFT JOIN srs_SourceSubs ON Lds_Leads.srs_id = srs_SourceSubs.id
+            WHERE app_Appointments.ApptDate BETWEEN '$secondaryStart' AND '$secondaryEnd' 
+            AND CAST(app_Appointments.ApptDate AS date) <= CAST(GETDATE() AS date) 
+            AND emp_Employees.Dialer = '1' 
+            AND app_Appointments.SetBy IN ($secondarySetterLPEmployeeIdsList) 
+            ORDER BY app_Appointments.id DESC";
             $secondarySettersAppointments = curlCall("$endpoint/lp/customReport.php?rptSQL=" . urlencode($secondarySettersAppointmentsQuery));
+            if(!is_array($secondarySettersAppointments)){
+                $secondarySettersAppointments = [];
+            }
+            // Disposition-based ApptSet filter, then drop older/duplicate same-day appointments for the same lead
+            $secondarySettersAppointments = filterAppointmentsSetByDisposition($secondarySettersAppointments, $dispositions);
+            $secondarySettersAppointments = filterLatestAppointmentPerLeadPerDay($secondarySettersAppointments);
         }
         
         // Format secondary appointments data
@@ -1586,6 +1782,9 @@ $holidays = [
                 'ApptSet' => $appointment['ApptSet'] ?? null,
                 'Issued' => $appointment['Issued'] ?? null,
                 'NetIssued' => $appointment['NetIssued'] ?? null,
+                'Productid' => $appointment['Productid'] ?? null,
+                'SourceCode' => $appointment['SourceCode'] ?? null,
+                'Descr' => $appointment['Descr'] ?? null,
             ];
         }
     }
@@ -1710,7 +1909,7 @@ $holidays = [
 
     $rtpDB = new db("promotion_flags", "intserver-intapps");
 
-    $query = "SELECT * FROM `emp` LEFT JOIN `data`.`Employees` ON emp_id = id WHERE dialer = 'True' AND active = 'True'";
+    $query = "SELECT * FROM `emp` LEFT JOIN `data`.`Employees` ON emp_id = id WHERE dialer = 'True'";
 
     $response = $rtpDB->query($query);
 
@@ -1789,6 +1988,20 @@ $holidays = [
             return true;
         }
         if(stripos($operationalUnitName, 'IPP Dialing') !== false || stripos($operationalUnitName, 'IPP') !== false){
+            return true;
+        }
+        return false;
+    }
+
+    // Match Confirmer handling: include "Setter - Office" and other Setter* units
+    function isSetterOperationalUnit($operationalUnitName){
+        if(!$operationalUnitName){
+            return false;
+        }
+        if($operationalUnitName === 'Setter' || $operationalUnitName === 'Setter - Office'){
+            return true;
+        }
+        if(stripos($operationalUnitName, 'Setter') !== false){
             return true;
         }
         return false;

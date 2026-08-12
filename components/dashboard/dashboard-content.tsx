@@ -320,7 +320,7 @@ const buildApiUrl = (
 ) => {
   const baseUrl = useDemoData
     ? "/api/demo/dashboard"
-    : "https://api.integrityprodserver.com/dashboards/ccHorsepowerTest.php"
+    : "https://api.integrityprodserver.com/dashboards/ccHorsepower.php"
   const params = new URLSearchParams({ dateRange })
   
   if (dateRange === 'Custom Dates' && customRange?.from && customRange?.to) {
@@ -1209,6 +1209,9 @@ export function DashboardContent() {
       lds_id: apt.lds_id ?? null,
       cst_id: apt.cst_id ?? null,
       dsp_id: apt.dsp_id ?? null,
+      Productid: apt.Productid ?? null,
+      SourceCode: apt.SourceCode ?? null,
+      Descr: apt.Descr ?? null,
     }))
   })() : []
 
