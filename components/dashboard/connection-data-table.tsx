@@ -52,6 +52,8 @@ interface ConnectionRecord {
 
 interface ConnectionDataTableProps {
   data: ConnectionRecord[]
+  /** Rows are fetched when the table opens, so it can render before they arrive. */
+  isLoading?: boolean
   open: boolean
   onOpenChange: (open: boolean) => void
   excludedIds?: Set<string>
@@ -63,6 +65,7 @@ type SortDirection = "asc" | "desc" | null
 
 export function ConnectionDataTable({ 
   data, 
+  isLoading = false,
   open, 
   onOpenChange,
   excludedIds = new Set(),
@@ -382,7 +385,7 @@ export function ConnectionDataTable({
                 {filteredAndSortedData.length === 0 ? (
                   <TableRow>
                     <TableCell colSpan={onExcludeRecords ? 6 : 4} className="text-center py-8 text-muted-foreground">
-                      {searchQuery ? "No records found matching your search." : "No data available."}
+                      {isLoading ? "Loading records…" : searchQuery ? "No records found matching your search." : "No data available."}
                     </TableCell>
                   </TableRow>
                 ) : (

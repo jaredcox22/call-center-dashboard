@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect } from "react"
+import { useState, useEffect, useMemo, useCallback } from "react"
 import { useAuth } from "@/contexts/auth-context"
 import { useTheme } from "@/contexts/theme-context"
 import { Button } from "@/components/ui/button"
@@ -22,7 +22,15 @@ import { ConversionUnqualifiedDataTable } from "./conversion-unqualified-data-ta
 import { GrossIssueDataTable } from "./gross-issue-data-table"
 import { ScorecardDataTable, type ScorecardRecord } from "./scorecard-data-table"
 import { ExcludedRecordsPanel } from "./excluded-records-panel"
-import { useExcludedRecords } from "@/hooks/use-excluded-records"
+import { useExcludedRecords, type ExcludableTableType } from "@/hooks/use-excluded-records"
+import {
+  EMPTY_CALL_AGGREGATE,
+  SECONDARY_DRILLDOWNS,
+  isHourInTimeRange,
+  summarizeCallAggregate,
+  type CallAggregate,
+  type DrilldownTable,
+} from "@/lib/call-aggregates"
 import { RefreshCw, Moon, Sun, CalendarIcon, AlertCircle, ChevronDown, Users } from "lucide-react"
 import { useRouter } from "next/navigation"
 import { UserMenu } from "./user-menu"
@@ -67,6 +75,24 @@ const fetcher = async (url: string) => {
 
 const isLongDashboardRange = (period: string) =>
   period === 'Year to Date' || period === 'YTD' || period === 'Custom Dates'
+
+// Shared empty references so memo dependencies stay stable across renders
+const EMPTY_ROWS: any[] = []
+const EMPTY_PRIMARY_PAYLOAD = {
+  settersCallsAggregate: EMPTY_CALL_AGGREGATE,
+  confirmersCallsAggregate: EMPTY_CALL_AGGREGATE,
+  gspCallsAggregate: EMPTY_CALL_AGGREGATE,
+  settersHours: EMPTY_ROWS,
+  confirmersHours: EMPTY_ROWS,
+  gspHours: EMPTY_ROWS,
+  settersScorecards: EMPTY_ROWS,
+  confirmersScorecards: EMPTY_ROWS,
+  settersAppointments: EMPTY_ROWS,
+  stl: EMPTY_ROWS,
+  levels: EMPTY_ROWS,
+  lights: { red: EMPTY_ROWS, green: EMPTY_ROWS },
+  callQueueDetails: EMPTY_ROWS,
+}
 
 /**
  * Formats seconds into a human-readable format with days, hours, minutes, and seconds
@@ -139,22 +165,6 @@ const extractHourFromDateString = (dateString: string): number => {
   } catch {
     return 0
   }
-}
-
-/**
- * Checks if an hour falls within the time range
- * Range is inclusive of start, exclusive of end (unless end is 0, then it's 24)
- */
-const isHourInTimeRange = (hour: number, startHour: number | undefined, endHour: number | undefined): boolean => {
-  if (startHour === undefined || endHour === undefined) {
-    return true // All Day - include all hours
-  }
-  
-  // Handle edge case: endHour === 0 means midnight (24)
-  const effectiveEndHour = endHour === 0 ? 24 : endHour
-  
-  // Range is inclusive of start, exclusive of end
-  return hour >= startHour && hour < effectiveEndHour
 }
 
 /**
@@ -288,10 +298,13 @@ const deserializeFilterState = (stored: FilterState): {
   const qualified = Array.isArray(stored.callBucketsQualified) ? stored.callBucketsQualified : (legacyBuckets ?? [])
   const unqualified = Array.isArray(stored.callBucketsUnqualified) ? stored.callBucketsUnqualified : (legacyBuckets ?? [])
   const validDashboardTabs: DashboardTab[] = ['setters', 'confirmers', 'gsp']
-  const storedTab = stored.dashboardType === 'ipp' ? 'gsp' : stored.dashboardType
-  const dashboardType: DashboardTab = validDashboardTabs.includes(storedTab as DashboardTab)
-    ? (storedTab as DashboardTab)
-    : 'setters'
+  // 'ipp' is a legacy persisted value from before the tab was renamed to 'gsp'
+  const storedTab: string = stored.dashboardType
+  const dashboardType: DashboardTab = storedTab === 'ipp'
+    ? 'gsp'
+    : validDashboardTabs.includes(storedTab as DashboardTab)
+      ? (storedTab as DashboardTab)
+      : 'setters'
   return {
     selectedEmployees: stored.selectedEmployees,
     timePeriod: stored.timePeriod,
@@ -318,59 +331,83 @@ const deserializeFilterState = (stored: FilterState): {
   }
 }
 
-type BuildApiUrlOptions = {
-  skipSecondary?: boolean
-  secondaryOnly?: boolean
+type DateRangeSelection = { from: Date | undefined; to?: Date | undefined }
+
+const LIVE_API_URL = "https://api.integrityprodserver.com/dashboards/ccHorsepower.php"
+const DEMO_API_URL = "/api/demo/dashboard"
+
+/** End date is exclusive server-side, so send the day after the selected end. */
+const formatExclusiveEndDate = (to: Date) => {
+  const nextDay = new Date(to)
+  nextDay.setDate(nextDay.getDate() + 1)
+  return format(nextDay, 'yyyy-MM-dd')
 }
 
-const buildApiUrl = (
-  dateRange: string, 
-  customRange?: { from: Date | undefined; to?: Date | undefined },
-  secondaryDateRange?: string,
-  secondaryCustomRange?: { from: Date | undefined; to?: Date | undefined },
-  lpId?: number | null,
-  useDemoData?: boolean,
-  options?: BuildApiUrlOptions
-) => {
-  const baseUrl = useDemoData
-    ? "/api/demo/dashboard"
-    : "https://api.integrityprodserver.com/dashboards/ccHorsepower.php"
-  const params = new URLSearchParams({ dateRange })
-  
-  if (dateRange === 'Custom Dates' && customRange?.from && customRange?.to) {
-    // Start date at beginning of day
-    params.append('startDate', format(customRange.from, 'yyyy-MM-dd'))
-    
-    // End date: add one day to make the range inclusive of the entire selected end date
-    const nextDay = new Date(customRange.to)
-    nextDay.setDate(nextDay.getDate() + 1)
-    params.append('endDate', format(nextDay, 'yyyy-MM-dd'))
+type WindowParams = {
+  /** Scope flag the endpoint uses to skip the window we don't need. */
+  scope: 'primary' | 'secondary'
+  dateRange: string
+  customRange?: DateRangeSelection
+  lpId?: number | null
+  /** Admin-excluded call IDs, applied server-side before aggregation. */
+  excludeCallIds?: string
+}
+
+/**
+ * Each request carries only the window it needs. That keeps the two sections'
+ * SWR cache keys independent, so changing one section's filter never invalidates
+ * the other, and lets the endpoint skip the work for the window we didn't ask for.
+ */
+const buildWindowParams = ({ scope, dateRange, customRange, lpId, excludeCallIds }: WindowParams) => {
+  const params = new URLSearchParams()
+
+  if (scope === 'primary') {
+    params.append('dateRange', dateRange)
+    if (dateRange === 'Custom Dates' && customRange?.from && customRange?.to) {
+      params.append('startDate', format(customRange.from, 'yyyy-MM-dd'))
+      params.append('endDate', formatExclusiveEndDate(customRange.to))
+    }
+    params.append('skipSecondary', '1')
+  } else {
+    // dateRange is required by the endpoint but unused when secondaryOnly is set.
+    // Pinning it to the cheapest window keeps this key independent of the top filter.
+    params.append('dateRange', 'Today')
+    params.append('secondaryDateRange', dateRange)
+    if (dateRange === 'Custom Dates' && customRange?.from && customRange?.to) {
+      params.append('secondaryStartDate', format(customRange.from, 'yyyy-MM-dd'))
+      params.append('secondaryEndDate', formatExclusiveEndDate(customRange.to))
+    }
+    params.append('secondaryOnly', '1')
   }
-  
-  // Always add secondary date range (defaults to "Rolling 30 Days" if not provided)
-  const effectiveSecondaryDateRange = secondaryDateRange || 'Rolling 30 Days'
-  params.append('secondaryDateRange', effectiveSecondaryDateRange)
-  
-  if (effectiveSecondaryDateRange === 'Custom Dates' && secondaryCustomRange?.from && secondaryCustomRange?.to) {
-    params.append('secondaryStartDate', format(secondaryCustomRange.from, 'yyyy-MM-dd'))
-    const secondaryNextDay = new Date(secondaryCustomRange.to)
-    secondaryNextDay.setDate(secondaryNextDay.getDate() + 1)
-    params.append('secondaryEndDate', format(secondaryNextDay, 'yyyy-MM-dd'))
-  }
-  
-  // Add LP ID if provided (for agent filtering)
+
   if (lpId !== null && lpId !== undefined) {
     params.append('lpId', lpId.toString())
   }
+  if (excludeCallIds) {
+    params.append('excludeCallIds', excludeCallIds)
+  }
 
-  if (options?.skipSecondary) {
-    params.append('skipSecondary', '1')
-  }
-  if (options?.secondaryOnly) {
-    params.append('secondaryOnly', '1')
-  }
-  
-  return `${baseUrl}?${params.toString()}`
+  return params
+}
+
+/** Metric cards and the employee table, served from pre-aggregated call buckets. */
+const buildAggregateApiUrl = (window: WindowParams, useDemoData: boolean | undefined) => {
+  if (useDemoData) return DEMO_API_URL
+  return `${LIVE_API_URL}?${buildWindowParams(window).toString()}`
+}
+
+/** Raw rows for a single drill-down table, fetched only while it is open. */
+const buildDrilldownApiUrl = (
+  table: DrilldownTable,
+  tab: DashboardTab,
+  window: WindowParams,
+  useDemoData: boolean | undefined
+) => {
+  if (useDemoData) return DEMO_API_URL
+  const params = buildWindowParams(window)
+  params.append('rowsFor', table)
+  params.append('tab', tab)
+  return `${LIVE_API_URL}?${params.toString()}`
 }
 
 // Type for excluded record IDs by table type
@@ -393,33 +430,17 @@ const transformApiData = (
   excludedIds?: ExcludedIdsByTable,
   selectedCallBuckets?: string[]
 ) => {
-  // Use the appropriate calls array based on dashboard type
+  // Calls arrive pre-aggregated by employee / hour / call bucket / qualified.
+  // Excluded call IDs are applied server-side before aggregation, since individual
+  // calls can no longer be subtracted from a bucket total here.
   const callsKey =
     dashboardType === 'setters'
       ? 'settersCalls'
       : dashboardType === 'gsp'
         ? 'gspCalls'
         : 'confirmersCalls'
-  let allCalls = apiData[callsKey] || []
-  
-  // Filter out excluded records from calls (using call id)
-  // Note: Connection, Pitch, Conversion, DialsPerHour, GrossIssue all share the same call id
-  // We use a combined set of all excluded call IDs
-  if (excludedIds) {
-    const excludedCallIds = new Set([
-      ...excludedIds.connection,
-      ...excludedIds.pitch,
-      ...excludedIds.conversion,
-      ...excludedIds.dialsPerHour,
-      ...excludedIds.grossIssue,
-      ...excludedIds.conversionQualified,
-      ...excludedIds.conversionUnqualified,
-    ])
-    if (excludedCallIds.size > 0) {
-      allCalls = allCalls.filter((call: any) => !excludedCallIds.has(String(call.id)))
-    }
-  }
-  
+  const callAggregate: CallAggregate = apiData[`${callsKey}Aggregate`] || EMPTY_CALL_AGGREGATE
+
   // Get scorecards based on dashboard type
   const scorecardsKey =
     dashboardType === 'setters' || dashboardType === 'gsp'
@@ -446,27 +467,14 @@ const transformApiData = (
     teamStl = teamStl.filter((stl: any) => !excludedIds.stl.has(String(stl.leadId)))
   }
   
-  // Filter data by time range if provided
-  let timeFilteredCalls = allCalls
-  if (timeRange && (timeRange.startHour !== undefined || timeRange.endHour !== undefined)) {
-    timeFilteredCalls = allCalls.filter((call: any) => {
-      if (!call.date) return false
-      const hour = extractHourFromDateString(call.date)
-      return isHourInTimeRange(hour, timeRange.startHour, timeRange.endHour)
-    })
-  }
-  
-  // Filter by call buckets (cqd_id) - multi-select
-  if (selectedCallBuckets && selectedCallBuckets.length > 0 && !selectedCallBuckets.includes('all')) {
-    const hasNone = selectedCallBuckets.includes('none')
-    const ids = new Set(selectedCallBuckets.filter((v) => v !== 'none').map((v) => Number(v)))
-    timeFilteredCalls = timeFilteredCalls.filter((c: any) => {
-      const noBucket = !c.cqd_id || c.cqd_id === 0
-      if (noBucket) return hasNone
-      return ids.has(Number(c.cqd_id))
-    })
-  }
-  
+  // Apply the employee / hour / call-bucket filters to the aggregate buckets
+  const { totals: callTotals, byEmployee: callTotalsByEmployee } = summarizeCallAggregate(
+    callAggregate,
+    selectedEmployees,
+    timeRange,
+    selectedCallBuckets
+  )
+
   // Filter STL data by time range if provided
   let timeFilteredStl = teamStl
   if (timeRange && (timeRange.startHour !== undefined || timeRange.endHour !== undefined)) {
@@ -478,28 +486,17 @@ const transformApiData = (
   }
   
   // Filter data by employee if employees are selected
-  let filteredCalls = timeFilteredCalls
   let filteredHours = allHours
   let filteredScorecards = allScorecards
   
   if (selectedEmployees.length > 0) {
-    filteredCalls = timeFilteredCalls.filter((call: any) => selectedEmployees.includes(call.employee))
     filteredHours = allHours.filter((h: any) => selectedEmployees.includes(h.employee))
     filteredScorecards = allScorecards.filter((scorecard: any) => selectedEmployees.includes(scorecard.employee))
   }
   
   // Calculate metrics from calls and hours for all dashboard types
   const employees = new Map()
-  const callsByEmployee = new Map()
   const hoursByEmployee = new Map<string, number>()
-  
-  // Aggregate calls by employee
-  filteredCalls.forEach((call: any) => {
-    if (!callsByEmployee.has(call.employee)) {
-      callsByEmployee.set(call.employee, [])
-    }
-    callsByEmployee.get(call.employee).push(call)
-  })
   
   // Create a map of hours by employee name
   filteredHours.forEach((h: any) => {
@@ -520,11 +517,8 @@ const transformApiData = (
   const positiveMultiplier = dashboardType === 'gsp' ? 8 : 10
 
   // Calculate per-employee stats
-  callsByEmployee.forEach((calls, employeeName) => {
-    const dials = calls.length
-    const connected = calls.filter((c: any) => c.connected === 1).length
-    const pitched = calls.filter((c: any) => c.pitched === 1).length
-    const positive = calls.filter((c: any) => c.positive === 1).length
+  callTotalsByEmployee.forEach((employeeCallTotals, employeeName) => {
+    const { dials, connected, pitched, positive } = employeeCallTotals
     const hours = hoursByEmployee.get(employeeName) || 0
     
     // Calculate horsepower per employee using the same formula as team metric (setters and GSP)
@@ -564,19 +558,16 @@ const transformApiData = (
   }
   
   // Calculate overall metrics
-  const totalCalls = filteredCalls.length
-  const totalConnected = filteredCalls.filter((c: any) => c.connected === 1).length
-  const totalPitched = filteredCalls.filter((c: any) => c.pitched === 1).length
-  const totalPositive = filteredCalls.filter((c: any) => c.positive === 1).length
-  
-  // Filter to only pitched calls for qualified/unqualified calculations
-  const pitchedCalls = filteredCalls.filter((c: any) => c.pitched === 1)
-  const totalQualified = pitchedCalls.filter((c: any) => c.qualified === true).length
-  const totalUnqualified = pitchedCalls.filter((c: any) => c.qualified === false).length
-  
-  // Calculate qualified and unqualified conversions (from pitched calls)
-  const totalQualifiedConversions = pitchedCalls.filter((c: any) => c.qualified === true && c.positive === 1).length
-  const totalUnqualifiedConversions = pitchedCalls.filter((c: any) => c.qualified === false && c.positive === 1).length
+  const totalCalls = callTotals.dials
+  const totalConnected = callTotals.connected
+  const totalPitched = callTotals.pitched
+  const totalPositive = callTotals.positive
+
+  // Qualified/unqualified counts are over pitched calls only
+  const totalQualified = callTotals.qualified
+  const totalUnqualified = callTotals.unqualified
+  const totalQualifiedConversions = callTotals.qualifiedConversions
+  const totalUnqualifiedConversions = callTotals.unqualifiedConversions
   
   // Get appointments data for gross issue calculation (only for setters dashboard)
   let allAppointments: any[] = []
@@ -608,8 +599,8 @@ const transformApiData = (
   }
   
   // Calculate totalApptSet and totalIssued from calls (for confirmers dashboard and backward compatibility)
-  const totalApptSet = filteredCalls.filter((c: any) => c.ApptSet != null && c.ApptSet > 0).length
-  const totalIssuedFromCalls = filteredCalls.filter((c: any) => c.Issued != null && c.Issued > 0).length
+  const totalApptSet = callTotals.apptSet
+  const totalIssuedFromCalls = callTotals.issued
   
   // Calculate total hours (using adjusted hours if time range is provided)
   const totalHours: number = Array.from(hoursByEmployee.values()).reduce((sum: number, hours: number) => sum + hours, 0)
@@ -845,41 +836,55 @@ export function DashboardContent() {
   // For agents, pass their LP ID to filter data; for admins, don't pass LP ID (get all data)
   // Split primary vs secondary so a slow YTD performance window cannot take down Today's metrics.
   const agentLpId = isAgent ? lpId : null
-  const canFetchPrimary = !(timePeriod === 'Custom Dates' && (!confirmedDateRange.from || !confirmedDateRange.to))
-  const canFetchSecondary = !(secondaryTimePeriod === 'Custom Dates' && (!secondaryConfirmedDateRange.from || !secondaryConfirmedDateRange.to))
 
-  const primaryApiUrl = canFetchPrimary
-    ? buildApiUrl(
-        timePeriod,
-        confirmedDateRange,
-        secondaryTimePeriod || 'Rolling 30 Days',
-        secondaryConfirmedDateRange,
-        agentLpId,
-        isDemoUser,
-        { skipSecondary: true }
-      )
-    : null
+  // Exclusions are applied server-side before aggregating, so we wait for them to
+  // load rather than firing an expensive request and immediately re-fetching.
+  const excludeCallIdsParam = useMemo(() => {
+    const callTableTypes: ExcludableTableType[] = [
+      'connection', 'pitch', 'conversion', 'dialsPerHour', 'conversionQualified', 'conversionUnqualified',
+    ]
+    const ids = new Set<string>()
+    for (const tableType of callTableTypes) {
+      for (const id of getExcludedIdsForTable(tableType)) ids.add(id)
+    }
+    return Array.from(ids).sort().join(',')
+  }, [getExcludedIdsForTable])
 
-  const secondaryApiUrl = canFetchPrimary && canFetchSecondary
-    ? buildApiUrl(
-        timePeriod,
-        confirmedDateRange,
-        secondaryTimePeriod || 'Rolling 30 Days',
-        secondaryConfirmedDateRange,
-        agentLpId,
-        isDemoUser,
-        { secondaryOnly: true }
-      )
-    : null
+  const hasCompletePrimaryRange = !(timePeriod === 'Custom Dates' && (!confirmedDateRange.from || !confirmedDateRange.to))
+  const hasCompleteSecondaryRange = !(secondaryTimePeriod === 'Custom Dates' && (!secondaryConfirmedDateRange.from || !secondaryConfirmedDateRange.to))
+  const canFetchPrimary = hasCompletePrimaryRange && !excludedRecordsLoading
+  const canFetchSecondary = hasCompleteSecondaryRange && !excludedRecordsLoading
 
-  const primaryRefreshInterval = isLongDashboardRange(timePeriod) ? 120000 : 30000
-  const secondaryRefreshInterval = isLongDashboardRange(secondaryTimePeriod) ? 300000 : 30000
+  const primaryWindow: WindowParams = useMemo(() => ({
+    scope: 'primary',
+    dateRange: timePeriod,
+    customRange: confirmedDateRange,
+    lpId: agentLpId,
+    excludeCallIds: excludeCallIdsParam,
+  }), [timePeriod, confirmedDateRange, agentLpId, excludeCallIdsParam])
 
-  const { data: primaryRawData, error, mutate: mutatePrimary } = useSWR(primaryApiUrl, fetcher, {
-    refreshInterval: primaryRefreshInterval,
+  const secondaryWindow: WindowParams = useMemo(() => ({
+    scope: 'secondary',
+    dateRange: secondaryTimePeriod || 'Rolling 30 Days',
+    customRange: secondaryConfirmedDateRange,
+    lpId: agentLpId,
+    excludeCallIds: excludeCallIdsParam,
+  }), [secondaryTimePeriod, secondaryConfirmedDateRange, agentLpId, excludeCallIdsParam])
+
+  const primaryApiUrl = canFetchPrimary ? buildAggregateApiUrl(primaryWindow, isDemoUser) : null
+  const secondaryApiUrl = canFetchSecondary ? buildAggregateApiUrl(secondaryWindow, isDemoUser) : null
+
+  const {
+    data: primaryRawData,
+    error,
+    mutate: mutatePrimary,
+    isValidating: isPrimaryValidating,
+  } = useSWR(primaryApiUrl, fetcher, {
+    refreshInterval: isLongDashboardRange(timePeriod) ? 120000 : 30000,
     revalidateOnFocus: true,
     revalidateOnReconnect: true,
     dedupingInterval: isLongDashboardRange(timePeriod) ? 60000 : 10000,
+    keepPreviousData: true,
   })
 
   const {
@@ -889,38 +894,87 @@ export function DashboardContent() {
     isLoading: isSecondaryLoading,
     isValidating: isSecondaryValidating,
   } = useSWR(secondaryApiUrl, fetcher, {
-    refreshInterval: secondaryRefreshInterval,
+    refreshInterval: isLongDashboardRange(secondaryTimePeriod) ? 300000 : 30000,
     revalidateOnFocus: !isLongDashboardRange(secondaryTimePeriod),
     revalidateOnReconnect: true,
     dedupingInterval: isLongDashboardRange(secondaryTimePeriod) ? 120000 : 10000,
     shouldRetryOnError: true,
     errorRetryCount: 2,
+    keepPreviousData: true,
   })
 
-  const mutate = () => {
+  const mutate = useCallback(() => {
     void mutatePrimary()
     void mutateSecondary()
-  }
+  }, [mutatePrimary, mutateSecondary])
 
-  const rawData = primaryRawData
-    ? {
-        ...primaryRawData,
-        secondarySettersCalls: secondaryRawData?.secondarySettersCalls ?? [],
-        secondaryConfirmersCalls: secondaryRawData?.secondaryConfirmersCalls ?? [],
-        secondaryGspCalls: secondaryRawData?.secondaryGspCalls ?? [],
-        secondarySettersHours: secondaryRawData?.secondarySettersHours ?? [],
-        secondaryConfirmersHours: secondaryRawData?.secondaryConfirmersHours ?? [],
-        secondaryGspHours: secondaryRawData?.secondaryGspHours ?? [],
-        secondarySettersScorecards: secondaryRawData?.secondarySettersScorecards ?? [],
-        secondaryConfirmersScorecards: secondaryRawData?.secondaryConfirmersScorecards ?? [],
-        secondarySettersAppointments: secondaryRawData?.secondarySettersAppointments ?? [],
-      }
+  // Merge the two responses into the shape the rest of the component expects.
+  // Either half may still be loading, so missing sections fall back to empty.
+  const rawData = useMemo(() => {
+    if (!primaryRawData && !secondaryRawData) return null
+    return {
+      ...(primaryRawData ?? EMPTY_PRIMARY_PAYLOAD),
+      secondarySettersCallsAggregate: secondaryRawData?.secondarySettersCallsAggregate ?? EMPTY_CALL_AGGREGATE,
+      secondaryConfirmersCallsAggregate: secondaryRawData?.secondaryConfirmersCallsAggregate ?? EMPTY_CALL_AGGREGATE,
+      secondaryGspCallsAggregate: secondaryRawData?.secondaryGspCallsAggregate ?? EMPTY_CALL_AGGREGATE,
+      secondarySettersHours: secondaryRawData?.secondarySettersHours ?? EMPTY_ROWS,
+      secondaryConfirmersHours: secondaryRawData?.secondaryConfirmersHours ?? EMPTY_ROWS,
+      secondaryGspHours: secondaryRawData?.secondaryGspHours ?? EMPTY_ROWS,
+      secondarySettersScorecards: secondaryRawData?.secondarySettersScorecards ?? EMPTY_ROWS,
+      secondaryConfirmersScorecards: secondaryRawData?.secondaryConfirmersScorecards ?? EMPTY_ROWS,
+      secondarySettersAppointments: secondaryRawData?.secondarySettersAppointments ?? EMPTY_ROWS,
+      callQueueDetails:
+        primaryRawData?.callQueueDetails ?? secondaryRawData?.callQueueDetails ?? EMPTY_ROWS,
+    }
+  }, [primaryRawData, secondaryRawData])
+
+  // Pending = nothing to show yet. Refreshing = showing the previous window while
+  // the newly selected one loads, so the section stays readable either way.
+  const isSecondaryPending =
+    Boolean(secondaryApiUrl) && !secondaryRawData && !secondaryError && (isSecondaryLoading || isSecondaryValidating)
+  const isSecondaryRefreshing = Boolean(secondaryRawData) && isSecondaryValidating
+  const isPrimaryRefreshing = Boolean(primaryRawData) && isPrimaryValidating
+
+  // Only one drill-down dialog can be open at a time, so a single request serves
+  // whichever one the user opened. Raw call rows are never part of the page load.
+  const openDrilldown: DrilldownTable | null =
+    connectionTableOpen ? 'connection'
+      : pitchTableOpen ? 'pitch'
+        : conversionTableOpen ? 'conversion'
+          : dialsPerHourTableOpen ? 'dialsPerHour'
+            : conversionQualifiedTableOpen ? 'conversionQualified'
+              : conversionUnqualifiedTableOpen ? 'conversionUnqualified'
+                : null
+
+  const drilldownApiUrl = openDrilldown
+    ? buildDrilldownApiUrl(
+        openDrilldown,
+        dashboardType,
+        SECONDARY_DRILLDOWNS.includes(openDrilldown) ? secondaryWindow : primaryWindow,
+        isDemoUser
+      )
     : null
 
-  const isSecondaryPending = Boolean(secondaryApiUrl) && !secondaryRawData && !secondaryError && (isSecondaryLoading || isSecondaryValidating)
+  const {
+    data: drilldownData,
+    error: drilldownError,
+    isLoading: isDrilldownLoading,
+  } = useSWR(drilldownApiUrl, fetcher, {
+    revalidateOnFocus: false,
+    revalidateOnReconnect: false,
+    dedupingInterval: 60000,
+    keepPreviousData: false,
+  })
+
+  // Guard against showing a previous table's rows while a new request is in flight
+  const drilldownRows: any[] = useMemo(
+    () => (openDrilldown && drilldownData?.rowsFor === openDrilldown ? (drilldownData.rows ?? EMPTY_ROWS) : EMPTY_ROWS),
+    [openDrilldown, drilldownData]
+  )
+  const isDrilldownPending = Boolean(openDrilldown) && drilldownRows.length === 0 && isDrilldownLoading
 
   // Build excluded IDs object for transformApiData
-  const excludedIdsForTransform: ExcludedIdsByTable = {
+  const excludedIdsForTransform: ExcludedIdsByTable = useMemo(() => ({
     stl: getExcludedIdsForTable("stl"),
     connection: getExcludedIdsForTable("connection"),
     pitch: getExcludedIdsForTable("pitch"),
@@ -929,36 +983,49 @@ export function DashboardContent() {
     grossIssue: getExcludedIdsForTable("grossIssue"),
     conversionQualified: getExcludedIdsForTable("conversionQualified"),
     conversionUnqualified: getExcludedIdsForTable("conversionUnqualified"),
-  }
+  }), [getExcludedIdsForTable])
 
-  const data = rawData ? transformApiData(rawData, selectedEmployees, dashboardType, confirmedTimeRange, excludedIdsForTransform) : null
-  const secondaryData = rawData ? transformApiData(
-    {
-      settersCalls: rawData.secondarySettersCalls || [],
-      gspCalls: rawData.secondaryGspCalls || [],
-      confirmersCalls: rawData.secondaryConfirmersCalls || [],
-      settersHours: rawData.secondarySettersHours || [],
-      gspHours: rawData.secondaryGspHours || [],
-      confirmersHours: rawData.secondaryConfirmersHours || [],
-      settersScorecards: rawData.secondarySettersScorecards || [],
-      confirmersScorecards: rawData.secondaryConfirmersScorecards || [],
-      settersAppointments: rawData.secondarySettersAppointments || [],
-      stl: [], // STL is team-wide, not needed for secondary metrics
-    },
-    selectedEmployees,
-    dashboardType,
-    secondaryConfirmedTimeRange,
-    excludedIdsForTransform
-  ) : null
+  // These walk every call row, so they must not re-run on unrelated state changes
+  const data = useMemo(
+    () => (primaryRawData
+      ? transformApiData(primaryRawData, selectedEmployees, dashboardType, confirmedTimeRange, excludedIdsForTransform)
+      : null),
+    [primaryRawData, selectedEmployees, dashboardType, confirmedTimeRange, excludedIdsForTransform]
+  )
+
+  const secondaryData = useMemo(
+    () => (secondaryRawData
+      ? transformApiData(
+          {
+            settersCallsAggregate: secondaryRawData.secondarySettersCallsAggregate || EMPTY_CALL_AGGREGATE,
+            gspCallsAggregate: secondaryRawData.secondaryGspCallsAggregate || EMPTY_CALL_AGGREGATE,
+            confirmersCallsAggregate: secondaryRawData.secondaryConfirmersCallsAggregate || EMPTY_CALL_AGGREGATE,
+            settersHours: secondaryRawData.secondarySettersHours || EMPTY_ROWS,
+            gspHours: secondaryRawData.secondaryGspHours || EMPTY_ROWS,
+            confirmersHours: secondaryRawData.secondaryConfirmersHours || EMPTY_ROWS,
+            settersScorecards: secondaryRawData.secondarySettersScorecards || EMPTY_ROWS,
+            confirmersScorecards: secondaryRawData.secondaryConfirmersScorecards || EMPTY_ROWS,
+            settersAppointments: secondaryRawData.secondarySettersAppointments || EMPTY_ROWS,
+            stl: EMPTY_ROWS, // STL is team-wide, not needed for secondary metrics
+          },
+          selectedEmployees,
+          dashboardType,
+          secondaryConfirmedTimeRange,
+          excludedIdsForTransform
+        )
+      : null),
+    [secondaryRawData, selectedEmployees, dashboardType, secondaryConfirmedTimeRange, excludedIdsForTransform]
+  )
   
   // Auto-select dashboard tab based on available data (only for agents, and only on initial load)
   const [hasAutoSelectedTab, setHasAutoSelectedTab] = useState(false)
   useEffect(() => {
     if (!rawData || hasAutoSelectedTab || hasTeamView) return
     
-    const hasSettersData = (rawData.settersCalls?.length > 0) || (rawData.settersHours?.length > 0)
-    const hasGspData = (rawData.gspCalls?.length > 0) || (rawData.gspHours?.length > 0)
-    const hasConfirmersData = (rawData.confirmersCalls?.length > 0) || (rawData.confirmersHours?.length > 0)
+    const hasCalls = (key: string) => (rawData[key]?.buckets?.length ?? 0) > 0
+    const hasSettersData = hasCalls('settersCallsAggregate') || (rawData.settersHours?.length > 0)
+    const hasGspData = hasCalls('gspCallsAggregate') || (rawData.gspHours?.length > 0)
+    const hasConfirmersData = hasCalls('confirmersCallsAggregate') || (rawData.confirmersHours?.length > 0)
     
     // Auto-select the first tab that has data
     if (hasSettersData) {
@@ -973,17 +1040,17 @@ export function DashboardContent() {
   }, [rawData, hasAutoSelectedTab, hasTeamView])
 
   // Get unique employees from the appropriate calls array or hours array based on dashboard type
-  const availableEmployees = rawData ? (() => {
+  const availableEmployees = useMemo(() => rawData ? (() => {
     const uniqueEmployees = new Set<string>()
     const callsKey = isSetterLikeTab(dashboardType)
       ? (dashboardType === 'gsp' ? 'gspCalls' : 'settersCalls')
       : 'confirmersCalls'
     const hoursKey = dashboardType === 'gsp' ? 'gspHours' : dashboardType === 'setters' ? 'settersHours' : 'confirmersHours'
-    const calls = rawData[callsKey] || []
+    const aggregate: CallAggregate = rawData[`${callsKey}Aggregate`] || EMPTY_CALL_AGGREGATE
     const hours = rawData[hoursKey] || []
-    calls.forEach((call: any) => {
-      if (call.employee) {
-        uniqueEmployees.add(call.employee)
+    aggregate.employeeNames.forEach((name) => {
+      if (name) {
+        uniqueEmployees.add(name)
       }
     })
     hours.forEach((h: any) => {
@@ -992,7 +1059,7 @@ export function DashboardContent() {
       }
     })
     return Array.from(uniqueEmployees).sort()
-  })() : []
+  })() : [], [rawData, dashboardType])
 
   // Auto-reset employee filter if selected employees don't exist in current data
   useEffect(() => {
@@ -1122,7 +1189,7 @@ export function DashboardContent() {
   })() : []
 
   // Helper function to filter calls by time range and employees
-  const getFilteredCalls = (calls: any[]) => {
+  const getFilteredCalls = useCallback((calls: any[]) => {
     // Filter by time range if provided (only when using Custom Dates)
     let timeFilteredCalls = calls
     if (timePeriod === 'Custom Dates' && confirmedTimeRange && (confirmedTimeRange.startHour !== undefined || confirmedTimeRange.endHour !== undefined)) {
@@ -1140,10 +1207,10 @@ export function DashboardContent() {
     }
     
     return filteredCalls
-  }
+  }, [timePeriod, confirmedTimeRange, selectedEmployees])
 
   // Helper to filter calls by secondary time range, optional call buckets, and employees (for performance metrics)
-  const getFilteredSecondaryCallsWithBuckets = (calls: any[], selectedBuckets: string[]) => {
+  const getFilteredSecondaryCallsWithBuckets = useCallback((calls: any[], selectedBuckets: string[]) => {
     let timeFilteredCalls = calls
     if (secondaryTimePeriod === 'Custom Dates' && secondaryConfirmedTimeRange && (secondaryConfirmedTimeRange.startHour !== undefined || secondaryConfirmedTimeRange.endHour !== undefined)) {
       timeFilteredCalls = calls.filter((call: any) => {
@@ -1165,51 +1232,37 @@ export function DashboardContent() {
       timeFilteredCalls = timeFilteredCalls.filter((call: any) => selectedEmployees.includes(call.employee))
     }
     return timeFilteredCalls
-  }
+  }, [secondaryTimePeriod, secondaryConfirmedTimeRange, selectedEmployees])
 
-  // Filter all calls for connection and dials per hour data tables
-  const filteredAllCalls = rawData ? (() => {
-    if (!isSetterLikeTab(dashboardType)) return []
-    
-    const callsKey = dashboardType === 'gsp' ? 'gspCalls' : 'settersCalls'
-    const allCalls = rawData[callsKey] || []
-    return getFilteredCalls(allCalls)
-  })() : []
+  // The drill-down tables below read rows fetched on demand for whichever table is
+  // open. The server already applies each table's row predicate and column set, so
+  // only the dashboard's own hour / employee / call-bucket filters are applied here.
+  const rowsForOpenTable = (table: DrilldownTable) => (openDrilldown === table ? drilldownRows : EMPTY_ROWS)
 
-  // Filter connected calls for pitch data table
-  const filteredConnectedCalls = rawData ? (() => {
-    if (!isSetterLikeTab(dashboardType)) return []
-    
-    const callsKey = dashboardType === 'gsp' ? 'gspCalls' : 'settersCalls'
-    const allCalls = rawData[callsKey] || []
-    const filteredCalls = getFilteredCalls(allCalls)
-    
-    // Filter to only connected calls (connected === 1)
-    const connectedCalls = filteredCalls.filter((call: any) => call.connected === 1)
-    
-    // Transform to PitchDataTable format
-    return connectedCalls.map((call: any) => ({
+  // All calls, for the connection and dials per hour data tables
+  const filteredAllCalls = useMemo(() => {
+    if (!isSetterLikeTab(dashboardType)) return EMPTY_ROWS
+    if (openDrilldown !== 'connection' && openDrilldown !== 'dialsPerHour') return EMPTY_ROWS
+    return getFilteredCalls(drilldownRows)
+  }, [dashboardType, openDrilldown, drilldownRows, getFilteredCalls])
+
+  // Connected calls, for the pitch data table
+  const filteredConnectedCalls = useMemo(() => {
+    if (!isSetterLikeTab(dashboardType)) return EMPTY_ROWS
+    return getFilteredCalls(rowsForOpenTable('pitch')).map((call: any) => ({
       employee: call.employee || '',
       date: call.date || null,
       connected: call.connected || 0,
       pitched: call.pitched || 0,
       id: call.id ?? null,
     }))
-  })() : []
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [dashboardType, openDrilldown, drilldownRows, getFilteredCalls])
 
-  // Filter pitched calls for conversion data table
-  const filteredPitchedCalls = rawData ? (() => {
-    if (!isSetterLikeTab(dashboardType)) return []
-    
-    const callsKey = dashboardType === 'gsp' ? 'gspCalls' : 'settersCalls'
-    const allCalls = rawData[callsKey] || []
-    const filteredCalls = getFilteredCalls(allCalls)
-    
-    // Filter to only pitched calls (pitched === 1)
-    const pitchedCalls = filteredCalls.filter((call: any) => call.pitched === 1)
-    
-    // Transform to ConversionDataTable format
-    return pitchedCalls.map((call: any) => ({
+  // Pitched calls, for the conversion data table
+  const filteredPitchedCalls = useMemo(() => {
+    if (!isSetterLikeTab(dashboardType)) return EMPTY_ROWS
+    return getFilteredCalls(rowsForOpenTable('conversion')).map((call: any) => ({
       employee: call.employee || '',
       date: call.date || null,
       pitched: call.pitched || 0,
@@ -1217,61 +1270,66 @@ export function DashboardContent() {
       qualified: call.qualified ?? null,
       id: call.id ?? null, // Use call.id as customer ID
     }))
-  })() : []
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [dashboardType, openDrilldown, drilldownRows, getFilteredCalls])
 
-  // Filter pitched calls for Conversion % (Qualified) — secondary date range + qualified call bucket filter
-  const filteredSecondaryPitchedCallsForQualified = rawData ? (() => {
-    if (!isSetterLikeTab(dashboardType)) return []
-    const allCalls = (dashboardType === 'gsp' ? rawData.secondaryGspCalls : rawData.secondarySettersCalls) || []
-    const filteredCalls = getFilteredSecondaryCallsWithBuckets(allCalls, selectedCallBucketsQualified)
-    const pitchedCalls = filteredCalls.filter((call: any) => call.pitched === 1)
-    return pitchedCalls.map((call: any) => ({
-      employee: call.employee || '',
-      date: call.date || null,
-      pitched: call.pitched || 0,
-      positive: call.positive || 0,
-      qualified: call.qualified ?? null,
-      id: call.id ?? null,
-      lds_id: call.lds_id ?? null,
-      cst_id: call.cst_id ?? null,
-      cqd_id: call.cqd_id ?? null,
-    }))
-  })() : []
+  const toSecondaryConversionRow = (call: any) => ({
+    employee: call.employee || '',
+    date: call.date || null,
+    pitched: call.pitched || 0,
+    positive: call.positive || 0,
+    qualified: call.qualified ?? null,
+    id: call.id ?? null,
+    lds_id: call.lds_id ?? null,
+    cst_id: call.cst_id ?? null,
+    cqd_id: call.cqd_id ?? null,
+  })
 
-  // Filter pitched calls for Conversion % (Un-Qualified) — secondary date range + unqualified call bucket filter
-  const filteredSecondaryPitchedCallsForUnqualified = rawData ? (() => {
-    if (!isSetterLikeTab(dashboardType)) return []
-    const allCalls = (dashboardType === 'gsp' ? rawData.secondaryGspCalls : rawData.secondarySettersCalls) || []
-    const filteredCalls = getFilteredSecondaryCallsWithBuckets(allCalls, selectedCallBucketsUnqualified)
-    const pitchedCalls = filteredCalls.filter((call: any) => call.pitched === 1)
-    return pitchedCalls.map((call: any) => ({
-      employee: call.employee || '',
-      date: call.date || null,
-      pitched: call.pitched || 0,
-      positive: call.positive || 0,
-      qualified: call.qualified ?? null,
-      id: call.id ?? null,
-      lds_id: call.lds_id ?? null,
-      cst_id: call.cst_id ?? null,
-      cqd_id: call.cqd_id ?? null,
-    }))
-  })() : []
+  // Pitched calls for Conversion % (Qualified) — secondary window + qualified call bucket filter
+  const filteredSecondaryPitchedCallsForQualified = useMemo(() => {
+    if (!isSetterLikeTab(dashboardType)) return EMPTY_ROWS
+    const rows = rowsForOpenTable('conversionQualified')
+    return getFilteredSecondaryCallsWithBuckets(rows, selectedCallBucketsQualified).map(toSecondaryConversionRow)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [dashboardType, openDrilldown, drilldownRows, getFilteredSecondaryCallsWithBuckets, selectedCallBucketsQualified])
 
-  // Conversion % (Qualified) and (Un-Qualified) metric values from bucket-filtered pitched calls
-  const conversionQualifiedMetricValue = (() => {
-    const qualified = filteredSecondaryPitchedCallsForQualified.filter((c: any) => c.qualified === true)
-    const conversions = qualified.filter((c: any) => c.positive === 1).length
-    return qualified.length > 0 ? Math.round((conversions / qualified.length) * 100) : 0
-  })()
-  const conversionUnqualifiedMetricValue = (() => {
-    const unqualified = filteredSecondaryPitchedCallsForUnqualified.filter((c: any) => c.qualified === false)
-    const conversions = unqualified.filter((c: any) => c.positive === 1).length
-    return unqualified.length > 0 ? Math.round((conversions / unqualified.length) * 100) : 0
-  })()
+  // Pitched calls for Conversion % (Un-Qualified) — secondary window + unqualified call bucket filter
+  const filteredSecondaryPitchedCallsForUnqualified = useMemo(() => {
+    if (!isSetterLikeTab(dashboardType)) return EMPTY_ROWS
+    const rows = rowsForOpenTable('conversionUnqualified')
+    return getFilteredSecondaryCallsWithBuckets(rows, selectedCallBucketsUnqualified).map(toSecondaryConversionRow)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [dashboardType, openDrilldown, drilldownRows, getFilteredSecondaryCallsWithBuckets, selectedCallBucketsUnqualified])
+
+  // Conversion % (Qualified) and (Un-Qualified) cards. These carry their own call
+  // bucket filter, so they are summed from the aggregate rather than from the
+  // drill-down rows, which only exist while a table is open.
+  const secondaryCallAggregate: CallAggregate = useMemo(
+    () => (secondaryRawData
+      ? secondaryRawData[dashboardType === 'gsp' ? 'secondaryGspCallsAggregate' : 'secondarySettersCallsAggregate'] || EMPTY_CALL_AGGREGATE
+      : EMPTY_CALL_AGGREGATE),
+    [secondaryRawData, dashboardType]
+  )
+
+  const conversionQualifiedMetricValue = useMemo(() => {
+    if (!isSetterLikeTab(dashboardType)) return 0
+    const { totals } = summarizeCallAggregate(
+      secondaryCallAggregate, selectedEmployees, secondaryConfirmedTimeRange, selectedCallBucketsQualified
+    )
+    return totals.qualified > 0 ? Math.round((totals.qualifiedConversions / totals.qualified) * 100) : 0
+  }, [dashboardType, secondaryCallAggregate, selectedEmployees, secondaryConfirmedTimeRange, selectedCallBucketsQualified])
+
+  const conversionUnqualifiedMetricValue = useMemo(() => {
+    if (!isSetterLikeTab(dashboardType)) return 0
+    const { totals } = summarizeCallAggregate(
+      secondaryCallAggregate, selectedEmployees, secondaryConfirmedTimeRange, selectedCallBucketsUnqualified
+    )
+    return totals.unqualified > 0 ? Math.round((totals.unqualifiedConversions / totals.unqualified) * 100) : 0
+  }, [dashboardType, secondaryCallAggregate, selectedEmployees, secondaryConfirmedTimeRange, selectedCallBucketsUnqualified])
 
   // Filter appointments for gross issue data table using secondary date range
   // Unfiltered appointments for GrossIssueDataTable (so it can show all employees in filter)
-  const allSecondaryGrossIssueAppointments = rawData ? (() => {
+  const allSecondaryGrossIssueAppointments = useMemo(() => rawData ? (() => {
     if (!isSetterLikeTab(dashboardType)) return []
     
     const appointmentsKey = 'secondarySettersAppointments'
@@ -1292,17 +1350,20 @@ export function DashboardContent() {
       SourceCode: apt.SourceCode ?? null,
       Descr: apt.Descr ?? null,
     }))
-  })() : []
+  })() : [], [rawData, dashboardType])
 
   // Filtered appointments for other uses (if needed)
-  const filteredSecondaryGrossIssueAppointments = selectedEmployees.length > 0
-    ? allSecondaryGrossIssueAppointments.filter((apt: any) => selectedEmployees.includes(apt.employee))
-    : allSecondaryGrossIssueAppointments
+  const filteredSecondaryGrossIssueAppointments = useMemo(
+    () => (selectedEmployees.length > 0
+      ? allSecondaryGrossIssueAppointments.filter((apt: any) => selectedEmployees.includes(apt.employee))
+      : allSecondaryGrossIssueAppointments),
+    [allSecondaryGrossIssueAppointments, selectedEmployees]
+  )
 
   // Build the scorecard data table source. Setters use the secondary (performance window)
   // bucket because the Setters Scorecard gauge lives in the secondary block; Confirmers use
   // the primary bucket because the Scorecard gauge is a primary metric there.
-  const scorecardTableData: ScorecardRecord[] = (() => {
+  const scorecardTableData: ScorecardRecord[] = useMemo(() => {
     if (!rawData) return []
     const sourceKey =
       dashboardType === 'confirmers'
@@ -1329,7 +1390,7 @@ export function DashboardContent() {
       variables: sc.variables ?? null,
       linkedCall: sc.linkedCall ?? null,
     }))
-  })()
+  }, [rawData, dashboardType, selectedEmployees])
 
   // Transform all calls for connection and dials per hour data tables
   const connectionTableData = filteredAllCalls.map((call: any) => ({
@@ -1347,16 +1408,43 @@ export function DashboardContent() {
   }))
 
   // Build available record IDs for filtering excluded records panel
-  const availableRecordIdsForPanel = {
-    stl: new Set<string>(filteredStlData.filter((r: any) => r.leadId != null).map((r: any) => String(r.leadId))),
-    connection: new Set<string>(connectionTableData.filter((r: any) => r.id != null).map((r: any) => String(r.id))),
-    pitch: new Set<string>(filteredConnectedCalls.filter((r: any) => r.id != null).map((r: any) => String(r.id))),
-    conversion: new Set<string>(filteredPitchedCalls.filter((r: any) => r.id != null).map((r: any) => String(r.id))),
-    dialsPerHour: new Set<string>(dialsPerHourTableData.filter((r: any) => r.id != null).map((r: any) => String(r.id))),
-    conversionQualified: new Set<string>(filteredSecondaryPitchedCallsForQualified.filter((r: any) => r.id != null).map((r: any) => String(r.id))),
-    conversionUnqualified: new Set<string>(filteredSecondaryPitchedCallsForUnqualified.filter((r: any) => r.id != null).map((r: any) => String(r.id))),
-    grossIssue: new Set<string>(filteredSecondaryGrossIssueAppointments.filter((r: any) => r.id != null).map((r: any) => String(r.id))),
-  }
+  // The panel only ever intersects these sets with the excluded records, so the
+  // excluded calls the server found in each window are sufficient — and mean we
+  // don't need every raw row loaded just to render an accurate count.
+  const availableRecordIdsForPanel = useMemo(() => {
+    const primaryAggregate: CallAggregate = primaryRawData
+      ? primaryRawData[dashboardType === 'gsp' ? 'gspCallsAggregate' : isSetterLikeTab(dashboardType) ? 'settersCallsAggregate' : 'confirmersCallsAggregate'] || EMPTY_CALL_AGGREGATE
+      : EMPTY_CALL_AGGREGATE
+
+    const primaryExcluded = getFilteredCalls(primaryAggregate.excludedRows ?? EMPTY_ROWS)
+    const secondaryExcludedQualified = getFilteredSecondaryCallsWithBuckets(
+      secondaryCallAggregate.excludedRows ?? EMPTY_ROWS, selectedCallBucketsQualified
+    )
+    const secondaryExcludedUnqualified = getFilteredSecondaryCallsWithBuckets(
+      secondaryCallAggregate.excludedRows ?? EMPTY_ROWS, selectedCallBucketsUnqualified
+    )
+    const idsOf = (rows: any[], predicate?: (row: any) => boolean) =>
+      new Set<string>(
+        rows
+          .filter((r: any) => r.id != null && (!predicate || predicate(r)))
+          .map((r: any) => String(r.id))
+      )
+
+    return {
+      stl: new Set<string>(filteredStlData.filter((r: any) => r.leadId != null).map((r: any) => String(r.leadId))),
+      connection: idsOf(primaryExcluded),
+      dialsPerHour: idsOf(primaryExcluded),
+      pitch: idsOf(primaryExcluded, (r) => r.connected === 1),
+      conversion: idsOf(primaryExcluded, (r) => r.pitched === 1),
+      conversionQualified: idsOf(secondaryExcludedQualified, (r) => r.pitched === 1),
+      conversionUnqualified: idsOf(secondaryExcludedUnqualified, (r) => r.pitched === 1),
+      grossIssue: new Set<string>(filteredSecondaryGrossIssueAppointments.filter((r: any) => r.id != null).map((r: any) => String(r.id))),
+    }
+  }, [
+    primaryRawData, dashboardType, secondaryCallAggregate, filteredStlData,
+    filteredSecondaryGrossIssueAppointments, getFilteredCalls, getFilteredSecondaryCallsWithBuckets,
+    selectedCallBucketsQualified, selectedCallBucketsUnqualified,
+  ])
 
   // Count excluded records that are relevant to the current time range
   const relevantExcludedCount = excludedRecords.filter((record) => {
@@ -1366,7 +1454,7 @@ export function DashboardContent() {
   }).length
 
   // Calculate total hours for dials per hour metric (same logic as in transformApiData)
-  const totalHoursForDialsPerHour = rawData ? (() => {
+  const totalHoursForDialsPerHour = useMemo(() => rawData ? (() => {
     if (!isSetterLikeTab(dashboardType) || dashboardType === 'gsp') return 0
     
     const hoursKey = 'settersHours'
@@ -1395,7 +1483,7 @@ export function DashboardContent() {
     
     // Calculate total hours
     return Array.from(hoursByEmployee.values()).reduce((sum: number, hours: number) => sum + hours, 0)
-  })() : 0
+  })() : 0, [rawData, dashboardType, selectedEmployees, timePeriod, confirmedTimeRange])
 
   if (error) {
     return (
@@ -1435,51 +1523,35 @@ export function DashboardContent() {
     },
   }
   
-  // Determine if there's actual data for the current dashboard type
-  const hasDataForCurrentDashboard = rawData ? (() => {
-    if (isSetterLikeTab(dashboardType)) {
-      const callsKey = dashboardType === 'gsp' ? 'gspCalls' : 'settersCalls'
-      const hoursKey = dashboardType === 'gsp' ? 'gspHours' : 'settersHours'
-      const calls = rawData[callsKey] || []
-      const hours = rawData[hoursKey] || []
-      // Filter by selected employees if any
-      if (selectedEmployees.length > 0) {
-        return calls.some((c: any) => selectedEmployees.includes(c.employee)) ||
-               hours.some((h: any) => selectedEmployees.includes(h.employee))
-      }
-      return calls.length > 0 || hours.length > 0
-    } else if (dashboardType === 'confirmers') {
-      const calls = rawData.confirmersCalls || []
-      const hours = rawData.confirmersHours || []
-      if (selectedEmployees.length > 0) {
-        return calls.some((c: any) => selectedEmployees.includes(c.employee)) ||
-               hours.some((h: any) => selectedEmployees.includes(h.employee))
-      }
-      return calls.length > 0 || hours.length > 0
-    }
-  })() : false
-  
-  // Determine if there's actual data for the secondary (Performance Metrics) dashboard
-  const hasDataForSecondaryDashboard = rawData ? (() => {
-    if (isSetterLikeTab(dashboardType)) {
-      const callsKey = dashboardType === 'gsp' ? 'secondaryGspCalls' : 'secondarySettersCalls'
-      const hoursKey = dashboardType === 'gsp' ? 'secondaryGspHours' : 'secondarySettersHours'
-      const calls = rawData[callsKey] || []
-      const hours = rawData[hoursKey] || []
-      if (selectedEmployees.length > 0) {
-        return calls.some((c: any) => selectedEmployees.includes(c.employee)) ||
-               hours.some((h: any) => selectedEmployees.includes(h.employee))
-      }
-      return calls.length > 0 || hours.length > 0
-    }
-    const calls = rawData.secondaryConfirmersCalls || []
-    const hours = rawData.secondaryConfirmersHours || []
+  // Presence checks read the aggregate's employee list instead of scanning rows
+  const hasCallsOrHoursFor = (aggregateKey: string, hoursKey: string) => {
+    if (!rawData) return false
+    const aggregate: CallAggregate = rawData[aggregateKey] || EMPTY_CALL_AGGREGATE
+    const hours = rawData[hoursKey] || []
     if (selectedEmployees.length > 0) {
-      return calls.some((c: any) => selectedEmployees.includes(c.employee)) ||
+      return aggregate.employeeNames.some((name) => selectedEmployees.includes(name)) ||
              hours.some((h: any) => selectedEmployees.includes(h.employee))
     }
-    return calls.length > 0 || hours.length > 0
-  })() : false
+    return aggregate.buckets.length > 0 || hours.length > 0
+  }
+
+  // Determine if there's actual data for the current dashboard type
+  const hasDataForCurrentDashboard = isSetterLikeTab(dashboardType)
+    ? hasCallsOrHoursFor(
+        dashboardType === 'gsp' ? 'gspCallsAggregate' : 'settersCallsAggregate',
+        dashboardType === 'gsp' ? 'gspHours' : 'settersHours'
+      )
+    : dashboardType === 'confirmers'
+      ? hasCallsOrHoursFor('confirmersCallsAggregate', 'confirmersHours')
+      : undefined
+
+  // Determine if there's actual data for the secondary (Performance Metrics) dashboard
+  const hasDataForSecondaryDashboard = isSetterLikeTab(dashboardType)
+    ? hasCallsOrHoursFor(
+        dashboardType === 'gsp' ? 'secondaryGspCallsAggregate' : 'secondarySettersCallsAggregate',
+        dashboardType === 'gsp' ? 'secondaryGspHours' : 'secondarySettersHours'
+      )
+    : hasCallsOrHoursFor('secondaryConfirmersCallsAggregate', 'secondaryConfirmersHours')
 
   return (
     <div className="min-h-screen bg-background">
@@ -1557,7 +1629,13 @@ export function DashboardContent() {
                 GSP
               </Button>
             </div>
-            <div className="flex gap-2 justify-evenly md:justify-start">
+            <div className="flex gap-2 items-center justify-evenly md:justify-start">
+              {isPrimaryRefreshing && (
+                <span className="flex items-center gap-1 text-xs text-muted-foreground">
+                  <RefreshCw className="h-3 w-3 animate-spin" />
+                  Updating…
+                </span>
+              )}
               <Select value={timePeriod} onValueChange={setTimePeriod}>
                 <SelectTrigger className="h-9 dark:border-white/10 bg-white dark:bg-transparent w-[140px]">
                   <SelectValue />
@@ -2037,7 +2115,15 @@ export function DashboardContent() {
                 <Card className="mb-6 p-3 bg-transparent shadow-none border-none dark:shadow-none dark:border-none">
                   <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
                     <div>
-                      <h2 className="text-2xl font-bold mb-2">Performance Metrics</h2>
+                      <div className="flex items-center gap-2 mb-2">
+                        <h2 className="text-2xl font-bold">Performance Metrics</h2>
+                        {isSecondaryRefreshing && (
+                          <span className="flex items-center gap-1 text-xs text-muted-foreground">
+                            <RefreshCw className="h-3 w-3 animate-spin" />
+                            Updating…
+                          </span>
+                        )}
+                      </div>
                       <p className="text-sm text-muted-foreground">
                         These metrics are best viewed over longer time periods. Default: Rolling 30 Days
                       </p>
@@ -2259,7 +2345,7 @@ export function DashboardContent() {
                 {/* Performance Metrics Display */}
                 {isSecondaryPending ? (
                   <Card className="mb-4 p-6">
-                    <div className="flex flex-col items-center justify-center text-center gap-2 min-h-[160px]">
+                    <div className="flex flex-col items-center justify-center text-center gap-2 min-h-40">
                       <RefreshCw className="h-5 w-5 animate-spin text-muted-foreground" />
                       <p className="text-sm font-medium">Loading performance metrics…</p>
                       <p className="text-xs text-muted-foreground">
@@ -2271,7 +2357,7 @@ export function DashboardContent() {
                   </Card>
                 ) : secondaryError ? (
                   <Card className="mb-4 p-6">
-                    <div className="flex flex-col items-center justify-center text-center gap-2 min-h-[160px]">
+                    <div className="flex flex-col items-center justify-center text-center gap-2 min-h-40">
                       <AlertCircle className="h-5 w-5 text-destructive" />
                       <p className="text-sm font-medium text-destructive">Could not load performance metrics</p>
                       <p className="text-xs text-muted-foreground max-w-md">{secondaryError.message}</p>
@@ -2585,7 +2671,9 @@ export function DashboardContent() {
       </main>
 
       {/* Loading Overlay - Only show on initial load, not when waiting for custom date selection */}
-      {!data && !(timePeriod === 'Custom Dates' && (!confirmedDateRange.from || !confirmedDateRange.to)) && !(secondaryTimePeriod === 'Custom Dates' && (!secondaryConfirmedDateRange.from || !secondaryConfirmedDateRange.to)) && <LoadingScreen />}
+      {/* Full-screen loader is tied to the primary window only; the performance
+          section reports its own loading state inline. */}
+      {!data && canFetchPrimary && <LoadingScreen />}
 
       {/* STL Data Table Dialog */}
       {rawData && rawData.stl && (
@@ -2605,6 +2693,7 @@ export function DashboardContent() {
         <>
           <ConversionDataTable
             data={filteredPitchedCalls}
+            isLoading={isDrilldownPending}
             open={conversionTableOpen}
             onOpenChange={setConversionTableOpen}
             excludedIds={getExcludedIdsForTable("conversion")}
@@ -2612,6 +2701,7 @@ export function DashboardContent() {
           />
           <PitchDataTable
             data={filteredConnectedCalls}
+            isLoading={isDrilldownPending}
             open={pitchTableOpen}
             onOpenChange={setPitchTableOpen}
             excludedIds={getExcludedIdsForTable("pitch")}
@@ -2619,6 +2709,7 @@ export function DashboardContent() {
           />
           <ConnectionDataTable
             data={connectionTableData}
+            isLoading={isDrilldownPending}
             open={connectionTableOpen}
             onOpenChange={setConnectionTableOpen}
             excludedIds={getExcludedIdsForTable("connection")}
@@ -2626,6 +2717,7 @@ export function DashboardContent() {
           />
           <DialsPerHourDataTable
             data={dialsPerHourTableData}
+            isLoading={isDrilldownPending}
             totalHours={totalHoursForDialsPerHour}
             open={dialsPerHourTableOpen}
             onOpenChange={setDialsPerHourTableOpen}
@@ -2634,6 +2726,7 @@ export function DashboardContent() {
           />
           <ConversionQualifiedDataTable
             data={filteredSecondaryPitchedCallsForQualified}
+            isLoading={isDrilldownPending}
             open={conversionQualifiedTableOpen}
             onOpenChange={setConversionQualifiedTableOpen}
             excludedIds={getExcludedIdsForTable("conversionQualified")}
@@ -2644,6 +2737,7 @@ export function DashboardContent() {
           />
           <ConversionUnqualifiedDataTable
             data={filteredSecondaryPitchedCallsForUnqualified}
+            isLoading={isDrilldownPending}
             open={conversionUnqualifiedTableOpen}
             onOpenChange={setConversionUnqualifiedTableOpen}
             excludedIds={getExcludedIdsForTable("conversionUnqualified")}

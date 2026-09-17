@@ -88,6 +88,8 @@ function formatCallBucketSelectionText(selectedCallBuckets: string[], callQueueD
 
 interface ConversionUnqualifiedDataTableProps {
   data: ConversionUnqualifiedRecord[]
+  /** Rows are fetched when the table opens, so it can render before they arrive. */
+  isLoading?: boolean
   open: boolean
   onOpenChange: (open: boolean) => void
   excludedIds?: Set<string>
@@ -108,6 +110,7 @@ function getCallBucketLabel(cqdId: number | null | undefined, callQueueDetails: 
 
 export function ConversionUnqualifiedDataTable({ 
   data, 
+  isLoading = false,
   open, 
   onOpenChange,
   excludedIds = new Set(),
@@ -522,7 +525,7 @@ export function ConversionUnqualifiedDataTable({
                 {filteredAndSortedData.length === 0 ? (
                   <TableRow>
                     <TableCell colSpan={onExcludeRecords ? 9 : 7} className="text-center py-8 text-muted-foreground">
-                      {searchQuery ? "No records found matching your search." : "No data available."}
+                      {isLoading ? "Loading records…" : searchQuery ? "No records found matching your search." : "No data available."}
                     </TableCell>
                   </TableRow>
                 ) : (

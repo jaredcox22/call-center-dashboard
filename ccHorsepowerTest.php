@@ -527,6 +527,8 @@ $holidays = [
     }
 
     if (!function_exists('buildCallIndex')) {
+            // Keeps only the fields findLinkedCall returns, and sorts each employee's
+            // calls by timestamp so lookups can binary search instead of scanning.
             function buildCallIndex($calls) {
                 $index = [];
                 if(!is_array($calls)) return $index;
@@ -536,7 +538,19 @@ $holidays = [
                     $ts = isset($call['CallDate']) ? strtotime($call['CallDate']) : false;
                     if($ts === false) continue;
                     if(!isset($index[$name])) $index[$name] = [];
-                    $index[$name][] = ['ts' => $ts, 'call' => $call];
+                    $index[$name][] = [
+                        'ts' => $ts,
+                        'call_id' => $call['id'] ?? null,
+                        'lds_id' => $call['lds_id'] ?? null,
+                        'cst_id' => $call['cst_id'] ?? null,
+                        'CallDate' => $call['CallDate'] ?? null,
+                    ];
+                }
+                foreach($index as $name => $entries) {
+                    usort($entries, function($a, $b) {
+                        return $a['ts'] - $b['ts'];
+                    });
+                    $index[$name] = $entries;
                 }
                 return $index;
             }
@@ -544,25 +558,182 @@ $holidays = [
 
     if (!function_exists('findLinkedCall')) {
             function findLinkedCall($index, $employeeName, $callDate, $toleranceSeconds = 120) {
-                if(!$employeeName || !$callDate || !isset($index[$employeeName])) return null;
+                if(!$employeeName || !$callDate || empty($index[$employeeName])) return null;
                 $target = strtotime($callDate);
                 if($target === false) return null;
+
+                $entries = $index[$employeeName];
+                // Binary search for the first call at or after the target time
+                $lo = 0;
+                $hi = count($entries) - 1;
+                while($lo <= $hi) {
+                    $mid = intval(($lo + $hi) / 2);
+                    if($entries[$mid]['ts'] < $target) {
+                        $lo = $mid + 1;
+                    } else {
+                        $hi = $mid - 1;
+                    }
+                }
+
+                // The nearest call is on one side of the insertion point
                 $best = null;
                 $bestDiff = $toleranceSeconds + 1;
-                foreach($index[$employeeName] as $entry) {
-                    $diff = abs($entry['ts'] - $target);
+                foreach([$lo - 1, $lo] as $candidateIdx) {
+                    if(!isset($entries[$candidateIdx])) continue;
+                    $diff = abs($entries[$candidateIdx]['ts'] - $target);
                     if($diff < $bestDiff) {
                         $bestDiff = $diff;
-                        $best = $entry['call'];
+                        $best = $entries[$candidateIdx];
                     }
                 }
                 if($best === null || $bestDiff > $toleranceSeconds) return null;
                 return [
-                    'call_id' => $best['id'] ?? null,
-                    'lds_id'  => $best['lds_id'] ?? null,
-                    'cst_id'  => $best['cst_id'] ?? null,
-                    'CallDate' => $best['CallDate'] ?? null,
+                    'call_id' => $best['call_id'],
+                    'lds_id'  => $best['lds_id'],
+                    'cst_id'  => $best['cst_id'],
+                    'CallDate' => $best['CallDate'],
                 ];
+            }
+    }
+
+    if (!function_exists('ccAggregateCallRows')) {
+            /**
+             * Collapses call rows into counts grouped by the only dimensions the
+             * dashboard filters on client-side: employee, hour of day, call bucket
+             * and qualified. A year of calls becomes a few thousand buckets, and any
+             * combination of those filters can still be evaluated from them.
+             *
+             * Counters: d=dials c=connected p=pitched v=positive
+             *           pv=pitched & positive  a=appointments set  i=issued
+             */
+            function ccAggregateCallRows($rows, $excludedCallIds = []) {
+                $employeeNames = [];
+                $nameIndex = [];
+                $buckets = [];
+                // Excluded calls that actually fall in this window, so the client can
+                // still show an accurate "excluded records" count and panel.
+                $excludedMatches = [];
+                if (!is_array($rows)) {
+                    return ['employeeNames' => [], 'buckets' => [], 'excludedRows' => []];
+                }
+                foreach ($rows as $row) {
+                    if (!empty($excludedCallIds) && isset($excludedCallIds[(string)($row['id'] ?? '')])) {
+                        $excludedMatches[] = $row;
+                        continue;
+                    }
+                    $name = $row['employee'] ?? '';
+                    if (!isset($nameIndex[$name])) {
+                        $nameIndex[$name] = count($employeeNames);
+                        $employeeNames[] = $name;
+                    }
+                    $employeeIdx = $nameIndex[$name];
+                    // 'YYYY-mm-dd HH:...' -> hour of day
+                    $hour = intval(substr((string)($row['date'] ?? ''), 11, 2));
+                    $bucket = intval($row['cqd_id'] ?? 0);
+                    $qualified = $row['qualified'] === true ? 1 : ($row['qualified'] === false ? 0 : -1);
+
+                    $key = $employeeIdx . '|' . $hour . '|' . $bucket . '|' . $qualified;
+                    if (!isset($buckets[$key])) {
+                        $buckets[$key] = [
+                            'e' => $employeeIdx, 'h' => $hour, 'b' => $bucket, 'q' => $qualified,
+                            'd' => 0, 'c' => 0, 'p' => 0, 'v' => 0, 'pv' => 0, 'a' => 0, 'i' => 0,
+                        ];
+                    }
+
+                    $connected = intval($row['connected'] ?? 0) === 1;
+                    $pitched = intval($row['pitched'] ?? 0) === 1;
+                    $positive = intval($row['positive'] ?? 0) === 1;
+
+                    $buckets[$key]['d']++;
+                    if ($connected) $buckets[$key]['c']++;
+                    if ($pitched) $buckets[$key]['p']++;
+                    if ($positive) $buckets[$key]['v']++;
+                    if ($pitched && $positive) $buckets[$key]['pv']++;
+                    if (isset($row['ApptSet']) && $row['ApptSet'] > 0) $buckets[$key]['a']++;
+                    if (isset($row['Issued']) && $row['Issued'] > 0) $buckets[$key]['i']++;
+                }
+                return [
+                    'employeeNames' => $employeeNames,
+                    'buckets' => array_values($buckets),
+                    'excludedRows' => $excludedMatches,
+                ];
+            }
+    }
+
+    if (!function_exists('ccProjectDrilldownRows')) {
+            /**
+             * Columns and row predicate for one drill-down table. Only the rows and
+             * fields that table renders are returned; the client still applies its own
+             * hour, employee and call-bucket filters, so those are never pre-applied.
+             */
+            function ccProjectDrilldownRows($rows, $table) {
+                $projections = [
+                    'connection'          => ['fields' => ['id','employee','date','connected'], 'require' => null],
+                    'dialsPerHour'        => ['fields' => ['id','employee','date','result'], 'require' => null],
+                    'pitch'               => ['fields' => ['id','employee','date','connected','pitched'], 'require' => 'connected'],
+                    'conversion'          => ['fields' => ['id','employee','date','pitched','positive','qualified'], 'require' => 'pitched'],
+                    'conversionQualified' => ['fields' => ['id','employee','date','pitched','positive','qualified','lds_id','cst_id','cqd_id'], 'require' => 'pitched'],
+                ];
+                // Both conversion drill-downs read the same pitched rows
+                $projections['conversionUnqualified'] = $projections['conversionQualified'];
+
+                if (!isset($projections[$table]) || !is_array($rows)) {
+                    return [];
+                }
+                $fields = $projections[$table]['fields'];
+                $require = $projections[$table]['require'];
+
+                $out = [];
+                foreach ($rows as $row) {
+                    if ($require !== null && intval($row[$require] ?? 0) !== 1) {
+                        continue;
+                    }
+                    $projected = [];
+                    foreach ($fields as $field) {
+                        $projected[$field] = $row[$field] ?? null;
+                    }
+                    $out[] = $projected;
+                }
+                return $out;
+            }
+    }
+
+    if (!function_exists('ccFinalizeResponse')) {
+            /**
+             * Last step before output. Either narrows the response to a single
+             * drill-down table's rows, or replaces the bulky call arrays with
+             * aggregates. Raw call rows are not returned by default: over a year they
+             * are ~200x the size of the aggregates the metric cards actually need.
+             */
+            function ccFinalizeResponse($responseData, $rowsFor, $activeTab, $excludedCallIds) {
+                $callKeysByTab = [
+                    'setters'    => ['primary' => 'settersCalls',    'secondary' => 'secondarySettersCalls'],
+                    'gsp'        => ['primary' => 'gspCalls',        'secondary' => 'secondaryGspCalls'],
+                    'confirmers' => ['primary' => 'confirmersCalls', 'secondary' => 'secondaryConfirmersCalls'],
+                ];
+
+                if ($rowsFor !== null) {
+                    $tab = isset($callKeysByTab[$activeTab]) ? $activeTab : 'setters';
+                    $secondaryTables = ['conversionQualified', 'conversionUnqualified'];
+                    $scope = in_array($rowsFor, $secondaryTables, true) ? 'secondary' : 'primary';
+                    $sourceKey = $callKeysByTab[$tab][$scope];
+                    return [
+                        'rowsFor' => $rowsFor,
+                        'tab' => $tab,
+                        'rows' => ccProjectDrilldownRows($responseData[$sourceKey] ?? [], $rowsFor),
+                    ];
+                }
+
+                foreach ($callKeysByTab as $keys) {
+                    foreach ($keys as $callKey) {
+                        if (!array_key_exists($callKey, $responseData)) {
+                            continue;
+                        }
+                        $responseData[$callKey . 'Aggregate'] = ccAggregateCallRows($responseData[$callKey], $excludedCallIds);
+                        $responseData[$callKey] = [];
+                    }
+                }
+                return $responseData;
             }
     }
 
@@ -715,6 +886,22 @@ $holidays = [
     // Request scope flags (used by the dashboard to split primary vs secondary loads)
     $skipSecondary = !empty($_GET['skipSecondary']);
     $secondaryOnly = !empty($_GET['secondaryOnly']);
+    $debugEnabled = !empty($_GET['debug']);
+
+    // Drill-down tables ask for their raw rows on demand; everything else gets aggregates
+    $rowsFor = isset($_GET['rowsFor']) && $_GET['rowsFor'] !== '' ? (string)$_GET['rowsFor'] : null;
+    $activeTab = isset($_GET['tab']) ? (string)$_GET['tab'] : 'setters';
+    // Records excluded by admins must be dropped before aggregating, since the
+    // client can no longer subtract individual calls from a bucket total.
+    $excludedCallIds = [];
+    if (!empty($_GET['excludeCallIds'])) {
+        foreach (explode(',', (string)$_GET['excludeCallIds']) as $excludedId) {
+            $excludedId = trim($excludedId);
+            if ($excludedId !== '') {
+                $excludedCallIds[$excludedId] = true;
+            }
+        }
+    }
     $lpId = isset($_GET['lpId']) ? intval($_GET['lpId']) : null;
     $scorecardFilterEmployeeName = null;
 
@@ -831,7 +1018,6 @@ $holidays = [
                 if($timesheet['IsInProgress']){
                     $timesheet['EndTimeLocalized'] = date('Y-m-d H:i:s');
                 }
-                $timesheets[] = $timesheet;
                 $employeeID = $timesheet['Employee'];
                 
                 // Calculate hours for this timesheet
@@ -1260,8 +1446,10 @@ $holidays = [
             'note' => count($mismatches) > 0 ? 'Employees clocked in as Confirmer found in setters hours array (should not happen with operational unit filtering)' : 'Hours array now filtered by operational unit - only Setter operational unit employees appear'
         ];
         
-        // Add debug info to response
-        $responseData['_debug'] = $debugInfo;
+        // Add debug info to response only when explicitly requested (it is large)
+        if($debugEnabled){
+            $responseData['_debug'] = $debugInfo;
+        }
 
         // Get unique employee names for setters and confirmers
         $settersEmployeeNames = [];
@@ -1510,7 +1698,9 @@ $holidays = [
         }
         
         // Store the setter LP employee IDs for use in secondary queries
-        $responseData['_setterLPEmployeeIds'] = $setterLPEmployeeIds;
+        if($debugEnabled){
+            $responseData['_setterLPEmployeeIds'] = $setterLPEmployeeIds;
+        }
     }
 
     // Fetch secondary data for performance metrics if secondaryDateRange is provided
@@ -2112,7 +2302,7 @@ $holidays = [
                 ];
             }
         }
-        exit(json_encode($responseData));
+        exit(json_encode(ccFinalizeResponse($responseData, $rowsFor, $activeTab, $excludedCallIds)));
     }
 
     $excludedStlSubsourceIds = [218];
@@ -2125,57 +2315,42 @@ $holidays = [
                 lds_Leads.DateEntered as 'DateEntered',
                 in1_InboundQueue1.DateReceived as 'DateReceived',
                 in1_InboundQueue1.CheckOutDate as 'CheckOutDate',
-                (
-                    SELECT TOP 1 CallDate
-                    FROM cls_Calls
-                    WHERE cst_id = lds_Leads.cst_id
-                        AND CallDate > in1_InboundQueue1.CheckOutDate
-                        AND ResultCode NOT IN ('*ND', 'ccND', 'NDDNC', 'NDLB', 'NDTR')
-                    ORDER BY CallDate ASC
-                ) as 'CallDate',
-                (
-                    SELECT TOP 1 emp_Employees.FirstName
-                    FROM cls_Calls
-                    INNER JOIN emp_Employees ON cls_Calls.emp_id = emp_Employees.id
-                    WHERE cst_id = lds_Leads.cst_id
-                        AND CallDate > in1_InboundQueue1.CheckOutDate
-                        AND ResultCode NOT IN ('*ND', 'ccND', 'NDDNC', 'NDLB', 'NDTR')
-                    ORDER BY CallDate ASC
-                ) as 'FirstName',
-                (
-                    SELECT TOP 1 emp_Employees.LastName
-                    FROM cls_Calls
-                    INNER JOIN emp_Employees ON cls_Calls.emp_id = emp_Employees.id
-                    WHERE cst_id = lds_Leads.cst_id
-                        AND CallDate > in1_InboundQueue1.CheckOutDate
-                        AND ResultCode NOT IN ('*ND', 'ccND', 'NDDNC', 'NDLB', 'NDTR')
-                    ORDER BY CallDate ASC
-                ) as 'LastName'
+                firstCall.CallDate as 'CallDate',
+                firstCall.FirstName as 'FirstName',
+                firstCall.LastName as 'LastName'
             FROM
                 lds_Leads
-            LEFT JOIN
+            INNER JOIN
                 in1_InboundQueue1
             ON
                 lds_Leads.id = in1_InboundQueue1.lds_id
+            OUTER APPLY (
+                SELECT TOP 1
+                    cls_Calls.CallDate,
+                    emp_Employees.FirstName,
+                    emp_Employees.LastName
+                FROM cls_Calls
+                INNER JOIN emp_Employees ON cls_Calls.emp_id = emp_Employees.id
+                WHERE cls_Calls.cst_id = lds_Leads.cst_id
+                    AND cls_Calls.CallDate > in1_InboundQueue1.CheckOutDate
+                    AND cls_Calls.ResultCode NOT IN ('*ND', 'ccND', 'NDDNC', 'NDLB', 'NDTR')
+                ORDER BY cls_Calls.CallDate ASC
+            ) AS firstCall
             WHERE
                 in1_InboundQueue1.DateReceived IS NOT NULL
-                AND (
-                    SELECT TOP 1 CallDate
-                    FROM cls_Calls
-                    WHERE cst_id = lds_Leads.cst_id
-                        AND CallDate > in1_InboundQueue1.CheckOutDate
-                        AND ResultCode NOT IN ('*ND', 'ccND', 'NDDNC', 'NDLB', 'NDTR')
-                    ORDER BY CallDate ASC
-                ) BETWEEN '$start' AND '$end'
+                AND firstCall.CallDate BETWEEN '$start' AND '$end'
                 AND lds_Leads.srs_id NOT IN ($excludedStlSubsourceSql)
     ";
 
     $rtdData = curlCall("$endpoint/lp/customReport.php?rptSQL=" . urlencode($query));
+    if(!is_array($rtdData)){
+        $rtdData = [];
+    }
     $responseData['stl'] = [];
     
-    // If lpId is provided, get the employee name to filter STL data
-    $lpIdEmployeeName = null;
-    if ($lpId !== null && $lpId > 0) {
+    // If lpId is provided, use the agent name already resolved for scorecard filtering
+    $lpIdEmployeeName = $scorecardFilterEmployeeName;
+    if ($lpIdEmployeeName === null && $lpId !== null && $lpId > 0) {
         $empNameQuery = "SELECT FirstName, LastName FROM emp_Employees WHERE id = " . $lpId;
         $empNameResult = curlCall("$endpoint/lp/customReport.php?rptSQL=" . urlencode($empNameQuery));
         if (!empty($empNameResult) && isset($empNameResult[0]['FirstName']) && isset($empNameResult[0]['LastName'])) {
@@ -2299,7 +2474,7 @@ $holidays = [
         }
     }
 
-    exit(json_encode($responseData));
+    exit(json_encode(ccFinalizeResponse($responseData, $rowsFor, $activeTab, $excludedCallIds)));
     
 
     function isGspOperationalUnit($operationalUnitName){
