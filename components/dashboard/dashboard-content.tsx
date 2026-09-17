@@ -54,11 +54,19 @@ const fetcher = async (url: string) => {
   })
   
   if (!response.ok) {
-    throw new Error('Failed to fetch dashboard data')
+    const isLongRange = /Year(\+|%20|\s)?to(\+|%20|\s)?Date|secondaryOnly=1/i.test(url)
+    throw new Error(
+      isLongRange
+        ? 'Failed to load year-to-date performance data. Try again or pick a shorter range.'
+        : 'Failed to fetch dashboard data'
+    )
   }
   
   return response.json()
 }
+
+const isLongDashboardRange = (period: string) =>
+  period === 'Year to Date' || period === 'YTD' || period === 'Custom Dates'
 
 /**
  * Formats seconds into a human-readable format with days, hours, minutes, and seconds
@@ -310,13 +318,19 @@ const deserializeFilterState = (stored: FilterState): {
   }
 }
 
+type BuildApiUrlOptions = {
+  skipSecondary?: boolean
+  secondaryOnly?: boolean
+}
+
 const buildApiUrl = (
   dateRange: string, 
   customRange?: { from: Date | undefined; to?: Date | undefined },
   secondaryDateRange?: string,
   secondaryCustomRange?: { from: Date | undefined; to?: Date | undefined },
   lpId?: number | null,
-  useDemoData?: boolean
+  useDemoData?: boolean,
+  options?: BuildApiUrlOptions
 ) => {
   const baseUrl = useDemoData
     ? "/api/demo/dashboard"
@@ -347,6 +361,13 @@ const buildApiUrl = (
   // Add LP ID if provided (for agent filtering)
   if (lpId !== null && lpId !== undefined) {
     params.append('lpId', lpId.toString())
+  }
+
+  if (options?.skipSecondary) {
+    params.append('skipSecondary', '1')
+  }
+  if (options?.secondaryOnly) {
+    params.append('secondaryOnly', '1')
   }
   
   return `${baseUrl}?${params.toString()}`
@@ -822,23 +843,81 @@ export function DashboardContent() {
 
   // Only build API URL if we have complete date range for custom dates
   // For agents, pass their LP ID to filter data; for admins, don't pass LP ID (get all data)
-  const apiUrl = (() => {
-    if (timePeriod === 'Custom Dates' && (!confirmedDateRange.from || !confirmedDateRange.to)) {
-      return null // Don't fetch until dates are confirmed with Ok button
-    }
-    if (secondaryTimePeriod === 'Custom Dates' && (!secondaryConfirmedDateRange.from || !secondaryConfirmedDateRange.to)) {
-      return null // Don't fetch until secondary dates are confirmed with Ok button
-    }
-    const agentLpId = isAgent ? lpId : null
-    return buildApiUrl(timePeriod, confirmedDateRange, secondaryTimePeriod || 'Rolling 30 Days', secondaryConfirmedDateRange, agentLpId, isDemoUser)
-  })()
+  // Split primary vs secondary so a slow YTD performance window cannot take down Today's metrics.
+  const agentLpId = isAgent ? lpId : null
+  const canFetchPrimary = !(timePeriod === 'Custom Dates' && (!confirmedDateRange.from || !confirmedDateRange.to))
+  const canFetchSecondary = !(secondaryTimePeriod === 'Custom Dates' && (!secondaryConfirmedDateRange.from || !secondaryConfirmedDateRange.to))
 
-  const { data: rawData, error, mutate } = useSWR(apiUrl, fetcher, {
-    refreshInterval: 30000, // 30 seconds
+  const primaryApiUrl = canFetchPrimary
+    ? buildApiUrl(
+        timePeriod,
+        confirmedDateRange,
+        secondaryTimePeriod || 'Rolling 30 Days',
+        secondaryConfirmedDateRange,
+        agentLpId,
+        isDemoUser,
+        { skipSecondary: true }
+      )
+    : null
+
+  const secondaryApiUrl = canFetchPrimary && canFetchSecondary
+    ? buildApiUrl(
+        timePeriod,
+        confirmedDateRange,
+        secondaryTimePeriod || 'Rolling 30 Days',
+        secondaryConfirmedDateRange,
+        agentLpId,
+        isDemoUser,
+        { secondaryOnly: true }
+      )
+    : null
+
+  const primaryRefreshInterval = isLongDashboardRange(timePeriod) ? 120000 : 30000
+  const secondaryRefreshInterval = isLongDashboardRange(secondaryTimePeriod) ? 300000 : 30000
+
+  const { data: primaryRawData, error, mutate: mutatePrimary } = useSWR(primaryApiUrl, fetcher, {
+    refreshInterval: primaryRefreshInterval,
     revalidateOnFocus: true,
     revalidateOnReconnect: true,
-    dedupingInterval: 10000,
+    dedupingInterval: isLongDashboardRange(timePeriod) ? 60000 : 10000,
   })
+
+  const {
+    data: secondaryRawData,
+    error: secondaryError,
+    mutate: mutateSecondary,
+    isLoading: isSecondaryLoading,
+    isValidating: isSecondaryValidating,
+  } = useSWR(secondaryApiUrl, fetcher, {
+    refreshInterval: secondaryRefreshInterval,
+    revalidateOnFocus: !isLongDashboardRange(secondaryTimePeriod),
+    revalidateOnReconnect: true,
+    dedupingInterval: isLongDashboardRange(secondaryTimePeriod) ? 120000 : 10000,
+    shouldRetryOnError: true,
+    errorRetryCount: 2,
+  })
+
+  const mutate = () => {
+    void mutatePrimary()
+    void mutateSecondary()
+  }
+
+  const rawData = primaryRawData
+    ? {
+        ...primaryRawData,
+        secondarySettersCalls: secondaryRawData?.secondarySettersCalls ?? [],
+        secondaryConfirmersCalls: secondaryRawData?.secondaryConfirmersCalls ?? [],
+        secondaryGspCalls: secondaryRawData?.secondaryGspCalls ?? [],
+        secondarySettersHours: secondaryRawData?.secondarySettersHours ?? [],
+        secondaryConfirmersHours: secondaryRawData?.secondaryConfirmersHours ?? [],
+        secondaryGspHours: secondaryRawData?.secondaryGspHours ?? [],
+        secondarySettersScorecards: secondaryRawData?.secondarySettersScorecards ?? [],
+        secondaryConfirmersScorecards: secondaryRawData?.secondaryConfirmersScorecards ?? [],
+        secondarySettersAppointments: secondaryRawData?.secondarySettersAppointments ?? [],
+      }
+    : null
+
+  const isSecondaryPending = Boolean(secondaryApiUrl) && !secondaryRawData && !secondaryError && (isSecondaryLoading || isSecondaryValidating)
 
   // Build excluded IDs object for transformApiData
   const excludedIdsForTransform: ExcludedIdsByTable = {
@@ -2178,7 +2257,30 @@ export function DashboardContent() {
                 </Card>
 
                 {/* Performance Metrics Display */}
-                {(!secondaryData || !hasDataForSecondaryDashboard) ? (
+                {isSecondaryPending ? (
+                  <Card className="mb-4 p-6">
+                    <div className="flex flex-col items-center justify-center text-center gap-2 min-h-[160px]">
+                      <RefreshCw className="h-5 w-5 animate-spin text-muted-foreground" />
+                      <p className="text-sm font-medium">Loading performance metrics…</p>
+                      <p className="text-xs text-muted-foreground">
+                        {isLongDashboardRange(secondaryTimePeriod)
+                          ? 'Year-to-date can take a bit longer. Horsepower metrics above stay available meanwhile.'
+                          : 'Fetching the selected performance window.'}
+                      </p>
+                    </div>
+                  </Card>
+                ) : secondaryError ? (
+                  <Card className="mb-4 p-6">
+                    <div className="flex flex-col items-center justify-center text-center gap-2 min-h-[160px]">
+                      <AlertCircle className="h-5 w-5 text-destructive" />
+                      <p className="text-sm font-medium text-destructive">Could not load performance metrics</p>
+                      <p className="text-xs text-muted-foreground max-w-md">{secondaryError.message}</p>
+                      <Button size="sm" variant="outline" className="mt-2" onClick={() => mutateSecondary()}>
+                        Retry
+                      </Button>
+                    </div>
+                  </Card>
+                ) : (!secondaryData || !hasDataForSecondaryDashboard) ? (
                   <>
                     {/* Skill Score - Full Width */}
                     <Card className="mb-4 p-4">

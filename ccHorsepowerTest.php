@@ -2,6 +2,28 @@
 ini_set('memory_limit', '512M'); // or 1024M if needed
 set_time_limit(120); // 2 minutes to avoid timeout
 
+register_shutdown_function(function () {
+    $error = error_get_last();
+    if (!$error) {
+        return;
+    }
+    $fatalTypes = [E_ERROR, E_PARSE, E_CORE_ERROR, E_COMPILE_ERROR, E_USER_ERROR];
+    if (!in_array($error['type'], $fatalTypes, true)) {
+        return;
+    }
+    if (headers_sent()) {
+        return;
+    }
+    http_response_code(500);
+    header('Content-Type: application/json');
+    echo json_encode([
+        'error' => 'Dashboard backend fatal error',
+        'message' => $error['message'] ?? 'Unknown error',
+        'file' => isset($error['file']) ? basename($error['file']) : null,
+        'line' => $error['line'] ?? null,
+    ]);
+});
+
 
 if (isset($_SERVER['HTTP_ORIGIN'])) {
     // Decide if the origin in $_SERVER['HTTP_ORIGIN'] is one
@@ -217,6 +239,333 @@ $holidays = [
         }
     }
 
+
+    // ---- Efficiency helpers for long date ranges (YTD, etc.) ----
+    if (!function_exists('ccDateRangeDayCount')) {
+        function ccDateRangeDayCount($start, $end) {
+            $s = strtotime($start);
+            $e = strtotime($end);
+            if ($s === false || $e === false) {
+                return 0;
+            }
+            return max(0, (int) floor(($e - $s) / 86400));
+        }
+    }
+
+    if (!function_exists('ccBuildDateChunks')) {
+        function ccBuildDateChunks($start, $end, $maxDays = 31) {
+            $chunks = [];
+            $current = strtotime($start);
+            $endTs = strtotime($end);
+            if ($current === false || $endTs === false || $current >= $endTs) {
+                return [[$start, $end]];
+            }
+            while ($current < $endTs) {
+                $chunkStart = date('Y-m-d', $current);
+                $chunkEndTs = min(strtotime('+' . intval($maxDays) . ' days', $current), $endTs);
+                $chunks[] = [$chunkStart, date('Y-m-d', $chunkEndTs)];
+                $current = $chunkEndTs;
+            }
+            return $chunks;
+        }
+    }
+
+    if (!function_exists('ccCurlMultiGet')) {
+        function ccCurlMultiGet($urls, $concurrency = 20) {
+            $count = count($urls);
+            $results = array_fill(0, $count, []);
+            if ($count === 0) {
+                return $results;
+            }
+
+            if (!function_exists('curl_multi_init')) {
+                foreach ($urls as $i => $url) {
+                    $decoded = curlCall($url);
+                    $results[$i] = is_array($decoded) ? $decoded : [];
+                }
+                return $results;
+            }
+
+            $concurrency = max(1, min(intval($concurrency), 30));
+            $mh = curl_multi_init();
+            $handles = [];
+            $indexMap = [];
+            $nextIndex = 0;
+            $active = 0;
+
+            $addHandle = function ($url, $origIndex) use ($mh, &$handles, &$indexMap, &$active) {
+                $ch = curl_init($url);
+                curl_setopt_array($ch, [
+                    CURLOPT_RETURNTRANSFER => true,
+                    CURLOPT_FOLLOWLOCATION => true,
+                    CURLOPT_CONNECTTIMEOUT => 15,
+                    CURLOPT_TIMEOUT => 90,
+                ]);
+                curl_multi_add_handle($mh, $ch);
+                $handles[(int) $ch] = $ch;
+                $indexMap[(int) $ch] = $origIndex;
+                $active++;
+            };
+
+            while ($active < $concurrency && $nextIndex < $count) {
+                $addHandle($urls[$nextIndex], $nextIndex);
+                $nextIndex++;
+            }
+
+            do {
+                do {
+                    $status = curl_multi_exec($mh, $running);
+                } while ($status === CURLM_CALL_MULTI_PERFORM);
+
+                while ($info = curl_multi_info_read($mh)) {
+                    $ch = $info['handle'];
+                    $id = (int) $ch;
+                    $origIndex = $indexMap[$id];
+                    $body = curl_multi_getcontent($ch);
+                    $decoded = json_decode($body, true);
+                    $results[$origIndex] = is_array($decoded) ? $decoded : [];
+                    curl_multi_remove_handle($mh, $ch);
+                    curl_close($ch);
+                    unset($handles[$id], $indexMap[$id]);
+                    $active--;
+
+                    if ($nextIndex < $count) {
+                        $addHandle($urls[$nextIndex], $nextIndex);
+                        $nextIndex++;
+                    }
+                }
+
+                if ($running) {
+                    curl_multi_select($mh, 1.0);
+                }
+            } while ($running || $active > 0);
+
+            curl_multi_close($mh);
+            return $results;
+        }
+    }
+
+    if (!function_exists('ccFetchTimesheetsByDeputy')) {
+        function ccFetchTimesheetsByDeputy($endpoint, $deputyIDs, $start, $end, $concurrency = 20) {
+            $byDeputy = [];
+            foreach ($deputyIDs as $id) {
+                $byDeputy[intval($id)] = [];
+            }
+            if (empty($deputyIDs)) {
+                return $byDeputy;
+            }
+
+            $dayCount = ccDateRangeDayCount($start, $end);
+            $chunks = $dayCount > 45 ? ccBuildDateChunks($start, $end, 31) : [[$start, $end]];
+
+            $urls = [];
+            $meta = [];
+            foreach ($deputyIDs as $deputyID) {
+                $id = intval($deputyID);
+                foreach ($chunks as $chunk) {
+                    $urls[] = "$endpoint/deputy/getTimesheets.php?startDate={$chunk[0]}&endDate={$chunk[1]}&id=$id";
+                    $meta[] = $id;
+                }
+            }
+
+            $results = ccCurlMultiGet($urls, $concurrency);
+            foreach ($results as $i => $rows) {
+                if (!is_array($rows) || empty($rows)) {
+                    continue;
+                }
+                if (isset($rows[0]) && is_array($rows[0])) {
+                    $list = $rows;
+                } elseif (isset($rows['data']) && is_array($rows['data'])) {
+                    $list = $rows['data'];
+                } else {
+                    $list = (isset($rows['Employee']) || isset($rows['Id'])) ? [$rows] : [];
+                }
+                $id = $meta[$i];
+                foreach ($list as $row) {
+                    if (is_array($row)) {
+                        $byDeputy[$id][] = $row;
+                    }
+                }
+            }
+            return $byDeputy;
+        }
+    }
+
+    if (!function_exists('ccFetchLpReportChunked')) {
+        function ccFetchLpReportChunked($endpoint, $sqlBuilder, $start, $end, $maxDays = 31, $concurrency = 8) {
+            $dayCount = ccDateRangeDayCount($start, $end);
+            $chunks = $dayCount > 45 ? ccBuildDateChunks($start, $end, $maxDays) : [[$start, $end]];
+            $urls = [];
+            foreach ($chunks as $chunk) {
+                $sql = $sqlBuilder($chunk[0], $chunk[1]);
+                $urls[] = "$endpoint/lp/customReport.php?rptSQL=" . urlencode($sql);
+            }
+            $parts = ccCurlMultiGet($urls, $concurrency);
+            $merged = [];
+            foreach ($parts as $rows) {
+                if (!is_array($rows)) {
+                    continue;
+                }
+                foreach ($rows as $row) {
+                    if (is_array($row)) {
+                        $merged[] = $row;
+                    }
+                }
+            }
+            return $merged;
+        }
+    }
+
+
+
+    // Scorecard helpers (hoisted so secondary-only requests can use them)
+    if (!function_exists('extractScorecardItems')) {
+            function extractScorecardItems($formData, $responses) {
+                $result = ['items' => [], 'maxTotal' => 0.0, 'actualTotal' => 0.0];
+
+                $fd = is_string($formData) ? json_decode($formData, true) : $formData;
+                $rs = is_string($responses) ? json_decode($responses, true) : $responses;
+
+                // 1) Legacy actualTotal: sum every number-typed response value, no matching required.
+                if(is_array($rs)) {
+                    foreach($rs as $r) {
+                        if(is_array($r) && ($r['type'] ?? null) === 'number' && isset($r['value'])) {
+                            $result['actualTotal'] += (float)$r['value'];
+                        }
+                    }
+                }
+
+                if(!is_array($fd) || !isset($fd['fields']) || !is_array($fd['fields'])) {
+                    return $result;
+                }
+
+                // 2) Build lookup tables for the items[] drill-down.
+                $byKey = [];
+                $byLabel = [];
+                $numberValueQueue = [];
+                if(is_array($rs)) {
+                    foreach($rs as $outerKey => $r) {
+                        if(is_array($r)) {
+                            $candidates = [];
+                            if(is_string($outerKey)) $candidates[] = $outerKey;
+                            foreach(['key', 'id', 'name'] as $kField) {
+                                if(isset($r[$kField]) && (is_string($r[$kField]) || is_int($r[$kField]))) {
+                                    $candidates[] = (string)$r[$kField];
+                                }
+                            }
+                            foreach(array_unique($candidates) as $c) {
+                                $byKey[$c] = $r;
+                            }
+                            foreach(['label', 'name', 'title'] as $lField) {
+                                if(isset($r[$lField]) && is_string($r[$lField])) {
+                                    $byLabel[$r[$lField]] = $r;
+                                }
+                            }
+                            if(($r['type'] ?? null) === 'number' && array_key_exists('value', $r)) {
+                                $numberValueQueue[] = (float)$r['value'];
+                            }
+                        } elseif(is_string($outerKey)) {
+                            $byKey[$outerKey] = ['value' => $r];
+                            if(is_numeric($r)) {
+                                $numberValueQueue[] = (float)$r;
+                            }
+                        }
+                    }
+                }
+
+                $queueIdx = 0;
+                foreach($fd['fields'] as $field) {
+                    if(!is_array($field)) continue;
+                    if(($field['type'] ?? null) !== 'number') continue;
+
+                    $key   = $field['key'] ?? $field['id'] ?? $field['name'] ?? null;
+                    $label = $field['label'] ?? $field['name'] ?? $field['title'] ?? $key;
+                    $max   = (float)($field['validation']['max'] ?? 0);
+
+                    $matched = false;
+                    $value = 0.0;
+
+                    // Try every plausible identifier on the form field
+                    $lookupCandidates = [];
+                    foreach(['key', 'id', 'name', 'label', 'title'] as $f) {
+                        if(isset($field[$f]) && (is_string($field[$f]) || is_int($field[$f]))) {
+                            $lookupCandidates[] = (string)$field[$f];
+                        }
+                    }
+                    foreach(array_unique($lookupCandidates) as $candidate) {
+                        if(isset($byKey[$candidate]) && array_key_exists('value', $byKey[$candidate])) {
+                            $value = (float)$byKey[$candidate]['value'];
+                            $matched = true;
+                            break;
+                        }
+                        if(isset($byLabel[$candidate]) && array_key_exists('value', $byLabel[$candidate])) {
+                            $value = (float)$byLabel[$candidate]['value'];
+                            $matched = true;
+                            break;
+                        }
+                    }
+
+                    // Positional fallback: consume next number-typed response value
+                    if(!$matched && $queueIdx < count($numberValueQueue)) {
+                        $value = $numberValueQueue[$queueIdx];
+                        $queueIdx++;
+                    }
+
+                    $result['items'][] = [
+                        'key'   => $key,
+                        'label' => $label,
+                        'max'   => $max,
+                        'value' => $value,
+                        'pct'   => $max > 0 ? round(($value / $max) * 100, 2) : 0,
+                    ];
+
+                    $result['maxTotal'] += $max;
+                }
+
+                return $result;
+            }
+    }
+
+    if (!function_exists('buildCallIndex')) {
+            function buildCallIndex($calls) {
+                $index = [];
+                if(!is_array($calls)) return $index;
+                foreach($calls as $call) {
+                    $name = trim(($call['FirstName'] ?? '') . ' ' . ($call['LastName'] ?? ''));
+                    if($name === '') continue;
+                    $ts = isset($call['CallDate']) ? strtotime($call['CallDate']) : false;
+                    if($ts === false) continue;
+                    if(!isset($index[$name])) $index[$name] = [];
+                    $index[$name][] = ['ts' => $ts, 'call' => $call];
+                }
+                return $index;
+            }
+    }
+
+    if (!function_exists('findLinkedCall')) {
+            function findLinkedCall($index, $employeeName, $callDate, $toleranceSeconds = 120) {
+                if(!$employeeName || !$callDate || !isset($index[$employeeName])) return null;
+                $target = strtotime($callDate);
+                if($target === false) return null;
+                $best = null;
+                $bestDiff = $toleranceSeconds + 1;
+                foreach($index[$employeeName] as $entry) {
+                    $diff = abs($entry['ts'] - $target);
+                    if($diff < $bestDiff) {
+                        $bestDiff = $diff;
+                        $best = $entry['call'];
+                    }
+                }
+                if($best === null || $bestDiff > $toleranceSeconds) return null;
+                return [
+                    'call_id' => $best['id'] ?? null,
+                    'lds_id'  => $best['lds_id'] ?? null,
+                    'cst_id'  => $best['cst_id'] ?? null,
+                    'CallDate' => $best['CallDate'] ?? null,
+                ];
+            }
+    }
+
     $dispositions = [];
 
     $start = date('Y-m-d');
@@ -266,12 +615,12 @@ $holidays = [
             $end = date('Y-m-d', strtotime('first day of this month'));
             break;
 
-        case 'Year to Date': // ! this and YTD aren't working
+        case 'Year to Date':
             $start = date('Y-01-01');
             $end = date('Y-m-d', strtotime('tomorrow'));
             break;
 
-        case 'YTD': // ! not working
+        case 'YTD':
             $start = date('Y-01-01');
             $end = date('Y-m-d', strtotime('tomorrow'));
             break;
@@ -363,6 +712,21 @@ $holidays = [
         }
     }
 
+    // Request scope flags (used by the dashboard to split primary vs secondary loads)
+    $skipSecondary = !empty($_GET['skipSecondary']);
+    $secondaryOnly = !empty($_GET['secondaryOnly']);
+    $lpId = isset($_GET['lpId']) ? intval($_GET['lpId']) : null;
+    $scorecardFilterEmployeeName = null;
+
+    // Raise limits for long windows (YTD / multi-month custom ranges)
+    $primaryDays = ccDateRangeDayCount($start, $end);
+    $secondaryDays = ccDateRangeDayCount($secondaryStart, $secondaryEnd);
+    $longestDays = max($primaryDays, $secondaryDays);
+    if ($longestDays > 60) {
+        ini_set('memory_limit', '1024M');
+        set_time_limit(300);
+    }
+
     // GSP cold-call list IDs (cls_Calls.ccl_id) — shared by primary and secondary queries
     $gspCclIds = [10, 11, 18, 19];
     $gspCclSqlIn = implode(',', array_map('intval', $gspCclIds));
@@ -372,11 +736,29 @@ $holidays = [
 
     if(array_key_exists('test', $_GET)){
 
+    }else if($secondaryOnly){
+        // Secondary-only request: skip primary horsepower window; still resolve agent name for filters
+        if ($lpId !== null && $lpId > 0) {
+            $empNameQuery = "SELECT FirstName, LastName FROM emp_Employees WHERE id = " . $lpId;
+            $empNameResult = curlCall("$endpoint/lp/customReport.php?rptSQL=" . urlencode($empNameQuery));
+            if (!empty($empNameResult) && isset($empNameResult[0]['FirstName']) && isset($empNameResult[0]['LastName'])) {
+                $scorecardFilterEmployeeName = trim($empNameResult[0]['FirstName']) . " " . trim($empNameResult[0]['LastName']);
+            }
+        }
+        $responseData['settersCalls'] = [];
+        $responseData['confirmersCalls'] = [];
+        $responseData['gspCalls'] = [];
+        $responseData['gspHours'] = [];
+        $responseData['settersHours'] = [];
+        $responseData['confirmersHours'] = [];
+        $responseData['settersScorecards'] = [];
+        $responseData['confirmersScorecards'] = [];
+        $responseData['settersAppointments'] = [];
+        $responseData['hours'] = [];
     }else{
         // STEP 1: Get unique deputy IDs and build Deputy-to-LP mapping from a lightweight query
         // This query gets all unique combinations of deputy ID and LP employee ID
         // If lpId is provided, filter to only that LP ID
-        $lpId = isset($_GET['lpId']) ? intval($_GET['lpId']) : null;
         $deputyMappingQuery = "SELECT DISTINCT emp_user_12, emp_id, FirstName, LastName FROM cls_Calls LEFT JOIN emp_Employees ON emp_id = emp_Employees.id WHERE CallDate BETWEEN '$start' AND '$end' AND ResultCode NOT LIKE '%ND%' AND Dialer = 'True' AND emp_user_12 > 0";
         
         // If lpId is provided, filter to only that LP ID
@@ -385,6 +767,9 @@ $holidays = [
         }
         
         $deputyMappingResults = curlCall("$endpoint/lp/customReport.php?rptSQL=" . urlencode($deputyMappingQuery));
+        if (!is_array($deputyMappingResults)) {
+            $deputyMappingResults = [];
+        }
         
         // Build mapping of Deputy ID to LP employee ID and collect all deputy IDs
         $deputyToLPMapping = [];
@@ -411,8 +796,12 @@ $holidays = [
         $employeeOperationalUnits = []; // Track operational units from timesheets
         $deputyIDOperationalUnits = []; // Track operational units per deputy ID to classify them
 
+        $timesheetsByDeputy = ccFetchTimesheetsByDeputy($endpoint, $deputyIDs, $start, $end);
         foreach($deputyIDs as $deputyID){
-            $theseTimesheets = curlCall("$endpoint/deputy/getTimesheets.php?startDate=$start&endDate=$end&id=" . intval($deputyID));
+            $theseTimesheets = $timesheetsByDeputy[intval($deputyID)] ?? [];
+            if (!is_array($theseTimesheets)) {
+                $theseTimesheets = [];
+            }
             foreach($theseTimesheets as $timesheet){
                 // Capture operational unit information
                 $operationalUnitName = null;
@@ -556,25 +945,27 @@ $holidays = [
         $confirmersCalls = [];
         $gspCalls = [];
         
-        // Fetch setters calls - only for employees clocked into Setter operational unit
+        // Fetch calls in parallel month chunks for long ranges (avoids SQL/gateway timeouts on YTD)
+        $settersCalls = [];
+        $gspCalls = [];
+        $confirmersCalls = [];
         if(!empty($settersDeputyIDs)){
             $settersDeputyIdsList = implode(',', $settersDeputyIDs);
-            $settersCallsQuery = "SELECT emp_user_12, emp_id, LastName, cls_Calls.id as id, FirstName, CallDate, ResultCode, cty_id, Connected, Pitched, Positive, qualified, lds_Leads.ApptSet, lds_Leads.Issued, cls_Calls.lds_id, cls_Calls.cst_id, cls_Calls.cqd_id FROM cls_Calls LEFT JOIN clr_CallResults ON ResultCode = clr_CallResults.id LEFT JOIN emp_Employees ON emp_id = emp_Employees.id LEFT JOIN lds_Leads ON cls_Calls.lds_id = lds_Leads.id LEFT JOIN srs_SourceSubs ON lds_Leads.srs_id = srs_SourceSubs.id WHERE CallDate BETWEEN '$start' AND '$end' AND ResultCode NOT IN ('*ND', 'TXT') AND Dialer = 'True' AND emp_user_12 IN ($settersDeputyIdsList) AND cty_id NOT IN ('C', 'IPP')$excludeGspCclSql";
-            $settersCalls = curlCall("$endpoint/lp/customReport.php?rptSQL=" . urlencode($settersCallsQuery));
+            $settersCalls = ccFetchLpReportChunked($endpoint, function($chunkStart, $chunkEnd) use ($settersDeputyIdsList, $excludeGspCclSql) {
+                return "SELECT emp_user_12, emp_id, LastName, cls_Calls.id as id, FirstName, CallDate, ResultCode, cty_id, Connected, Pitched, Positive, qualified, lds_Leads.ApptSet, lds_Leads.Issued, cls_Calls.lds_id, cls_Calls.cst_id, cls_Calls.cqd_id FROM cls_Calls LEFT JOIN clr_CallResults ON ResultCode = clr_CallResults.id LEFT JOIN emp_Employees ON emp_id = emp_Employees.id LEFT JOIN lds_Leads ON cls_Calls.lds_id = lds_Leads.id LEFT JOIN srs_SourceSubs ON lds_Leads.srs_id = srs_SourceSubs.id WHERE CallDate BETWEEN '$chunkStart' AND '$chunkEnd' AND ResultCode NOT IN ('*ND', 'TXT') AND Dialer = 'True' AND emp_user_12 IN ($settersDeputyIdsList) AND cty_id NOT IN ('C', 'IPP')$excludeGspCclSql";
+            }, $start, $end);
         }
-        
-        // Fetch GSP calls - only for employees clocked into GSP operational unit
         if(!empty($gspDeputyIDs)){
             $gspDeputyIdsList = implode(',', $gspDeputyIDs);
-            $gspCallsQuery = "SELECT emp_user_12, emp_id, LastName, cls_Calls.id as id, FirstName, CallDate, ResultCode, cty_id, Connected, Pitched, Positive, qualified, lds_Leads.ApptSet, lds_Leads.Issued, cls_Calls.lds_id, cls_Calls.cst_id, cls_Calls.cqd_id FROM cls_Calls LEFT JOIN clr_CallResults ON ResultCode = clr_CallResults.id LEFT JOIN emp_Employees ON emp_id = emp_Employees.id LEFT JOIN lds_Leads ON cls_Calls.lds_id = lds_Leads.id LEFT JOIN srs_SourceSubs ON lds_Leads.srs_id = srs_SourceSubs.id WHERE CallDate BETWEEN '$start' AND '$end' AND ResultCode NOT IN ('*ND', 'TXT') AND Dialer = 'True' AND emp_user_12 IN ($gspDeputyIdsList)$gspCallsFilterSql";
-            $gspCalls = curlCall("$endpoint/lp/customReport.php?rptSQL=" . urlencode($gspCallsQuery));
+            $gspCalls = ccFetchLpReportChunked($endpoint, function($chunkStart, $chunkEnd) use ($gspDeputyIdsList, $gspCallsFilterSql) {
+                return "SELECT emp_user_12, emp_id, LastName, cls_Calls.id as id, FirstName, CallDate, ResultCode, cty_id, Connected, Pitched, Positive, qualified, lds_Leads.ApptSet, lds_Leads.Issued, cls_Calls.lds_id, cls_Calls.cst_id, cls_Calls.cqd_id FROM cls_Calls LEFT JOIN clr_CallResults ON ResultCode = clr_CallResults.id LEFT JOIN emp_Employees ON emp_id = emp_Employees.id LEFT JOIN lds_Leads ON cls_Calls.lds_id = lds_Leads.id LEFT JOIN srs_SourceSubs ON lds_Leads.srs_id = srs_SourceSubs.id WHERE CallDate BETWEEN '$chunkStart' AND '$chunkEnd' AND ResultCode NOT IN ('*ND', 'TXT') AND Dialer = 'True' AND emp_user_12 IN ($gspDeputyIdsList)$gspCallsFilterSql";
+            }, $start, $end);
         }
-        
-        // Fetch confirmers calls - only for employees clocked into Confirmer operational unit
         if(!empty($confirmersDeputyIDs)){
             $confirmersDeputyIdsList = implode(',', $confirmersDeputyIDs);
-            $confirmersCallsQuery = "SELECT emp_user_12, emp_id, LastName, cls_Calls.id as id, FirstName, CallDate, ResultCode, cty_id, Connected, Pitched, Positive, qualified, lds_Leads.ApptSet, lds_Leads.Issued, cls_Calls.cqd_id FROM cls_Calls LEFT JOIN clr_CallResults ON ResultCode = clr_CallResults.id LEFT JOIN emp_Employees ON emp_id = emp_Employees.id LEFT JOIN lds_Leads ON cls_Calls.lds_id = lds_Leads.id LEFT JOIN srs_SourceSubs ON lds_Leads.srs_id = srs_SourceSubs.id WHERE CallDate BETWEEN '$start' AND '$end' AND ResultCode NOT IN ('*ND', 'TXT') AND Dialer = 'True' AND emp_user_12 IN ($confirmersDeputyIdsList) AND cty_id = 'C'$excludeGspCclSql";
-            $confirmersCalls = curlCall("$endpoint/lp/customReport.php?rptSQL=" . urlencode($confirmersCallsQuery));
+            $confirmersCalls = ccFetchLpReportChunked($endpoint, function($chunkStart, $chunkEnd) use ($confirmersDeputyIdsList, $excludeGspCclSql) {
+                return "SELECT emp_user_12, emp_id, LastName, cls_Calls.id as id, FirstName, CallDate, ResultCode, cty_id, Connected, Pitched, Positive, qualified, lds_Leads.ApptSet, lds_Leads.Issued, cls_Calls.cqd_id FROM cls_Calls LEFT JOIN clr_CallResults ON ResultCode = clr_CallResults.id LEFT JOIN emp_Employees ON emp_id = emp_Employees.id LEFT JOIN lds_Leads ON cls_Calls.lds_id = lds_Leads.id LEFT JOIN srs_SourceSubs ON lds_Leads.srs_id = srs_SourceSubs.id WHERE CallDate BETWEEN '$chunkStart' AND '$chunkEnd' AND ResultCode NOT IN ('*ND', 'TXT') AND Dialer = 'True' AND emp_user_12 IN ($confirmersDeputyIdsList) AND cty_id = 'C'$excludeGspCclSql";
+            }, $start, $end);
         }
 
         // STEP 5: Process setters calls (already filtered by operational unit at SQL level)
@@ -929,154 +1320,18 @@ $holidays = [
         //
         // items[] are a best-effort drill-down. Matching tries (in order): exact key/id/name,
         // label, then a positional queue of number-typed responses.
-        function extractScorecardItems($formData, $responses) {
-            $result = ['items' => [], 'maxTotal' => 0.0, 'actualTotal' => 0.0];
-
-            $fd = is_string($formData) ? json_decode($formData, true) : $formData;
-            $rs = is_string($responses) ? json_decode($responses, true) : $responses;
-
-            // 1) Legacy actualTotal: sum every number-typed response value, no matching required.
-            if(is_array($rs)) {
-                foreach($rs as $r) {
-                    if(is_array($r) && ($r['type'] ?? null) === 'number' && isset($r['value'])) {
-                        $result['actualTotal'] += (float)$r['value'];
-                    }
-                }
-            }
-
-            if(!is_array($fd) || !isset($fd['fields']) || !is_array($fd['fields'])) {
-                return $result;
-            }
-
-            // 2) Build lookup tables for the items[] drill-down.
-            $byKey = [];
-            $byLabel = [];
-            $numberValueQueue = [];
-            if(is_array($rs)) {
-                foreach($rs as $outerKey => $r) {
-                    if(is_array($r)) {
-                        $candidates = [];
-                        if(is_string($outerKey)) $candidates[] = $outerKey;
-                        foreach(['key', 'id', 'name'] as $kField) {
-                            if(isset($r[$kField]) && (is_string($r[$kField]) || is_int($r[$kField]))) {
-                                $candidates[] = (string)$r[$kField];
-                            }
-                        }
-                        foreach(array_unique($candidates) as $c) {
-                            $byKey[$c] = $r;
-                        }
-                        foreach(['label', 'name', 'title'] as $lField) {
-                            if(isset($r[$lField]) && is_string($r[$lField])) {
-                                $byLabel[$r[$lField]] = $r;
-                            }
-                        }
-                        if(($r['type'] ?? null) === 'number' && array_key_exists('value', $r)) {
-                            $numberValueQueue[] = (float)$r['value'];
-                        }
-                    } elseif(is_string($outerKey)) {
-                        $byKey[$outerKey] = ['value' => $r];
-                        if(is_numeric($r)) {
-                            $numberValueQueue[] = (float)$r;
-                        }
-                    }
-                }
-            }
-
-            $queueIdx = 0;
-            foreach($fd['fields'] as $field) {
-                if(!is_array($field)) continue;
-                if(($field['type'] ?? null) !== 'number') continue;
-
-                $key   = $field['key'] ?? $field['id'] ?? $field['name'] ?? null;
-                $label = $field['label'] ?? $field['name'] ?? $field['title'] ?? $key;
-                $max   = (float)($field['validation']['max'] ?? 0);
-
-                $matched = false;
-                $value = 0.0;
-
-                // Try every plausible identifier on the form field
-                $lookupCandidates = [];
-                foreach(['key', 'id', 'name', 'label', 'title'] as $f) {
-                    if(isset($field[$f]) && (is_string($field[$f]) || is_int($field[$f]))) {
-                        $lookupCandidates[] = (string)$field[$f];
-                    }
-                }
-                foreach(array_unique($lookupCandidates) as $candidate) {
-                    if(isset($byKey[$candidate]) && array_key_exists('value', $byKey[$candidate])) {
-                        $value = (float)$byKey[$candidate]['value'];
-                        $matched = true;
-                        break;
-                    }
-                    if(isset($byLabel[$candidate]) && array_key_exists('value', $byLabel[$candidate])) {
-                        $value = (float)$byLabel[$candidate]['value'];
-                        $matched = true;
-                        break;
-                    }
-                }
-
-                // Positional fallback: consume next number-typed response value
-                if(!$matched && $queueIdx < count($numberValueQueue)) {
-                    $value = $numberValueQueue[$queueIdx];
-                    $queueIdx++;
-                }
-
-                $result['items'][] = [
-                    'key'   => $key,
-                    'label' => $label,
-                    'max'   => $max,
-                    'value' => $value,
-                    'pct'   => $max > 0 ? round(($value / $max) * 100, 2) : 0,
-                ];
-
-                $result['maxTotal'] += $max;
-            }
-
-            return $result;
-        }
+        // extractScorecardItems defined in efficiency helpers above
 
         // Helper: build an index of calls keyed by employee name for fast (name + time) lookups.
         // Each entry is an array of [ts => unix_timestamp, call => raw_call_row].
-        function buildCallIndex($calls) {
-            $index = [];
-            if(!is_array($calls)) return $index;
-            foreach($calls as $call) {
-                $name = trim(($call['FirstName'] ?? '') . ' ' . ($call['LastName'] ?? ''));
-                if($name === '') continue;
-                $ts = isset($call['CallDate']) ? strtotime($call['CallDate']) : false;
-                if($ts === false) continue;
-                if(!isset($index[$name])) $index[$name] = [];
-                $index[$name][] = ['ts' => $ts, 'call' => $call];
-            }
-            return $index;
-        }
+        // buildCallIndex defined in efficiency helpers above
 
         // Helper: given a call index, find the closest call to the given (employee, callDate)
         // within $toleranceSeconds. Returns null if no match.
-        function findLinkedCall($index, $employeeName, $callDate, $toleranceSeconds = 120) {
-            if(!$employeeName || !$callDate || !isset($index[$employeeName])) return null;
-            $target = strtotime($callDate);
-            if($target === false) return null;
-            $best = null;
-            $bestDiff = $toleranceSeconds + 1;
-            foreach($index[$employeeName] as $entry) {
-                $diff = abs($entry['ts'] - $target);
-                if($diff < $bestDiff) {
-                    $bestDiff = $diff;
-                    $best = $entry['call'];
-                }
-            }
-            if($best === null || $bestDiff > $toleranceSeconds) return null;
-            return [
-                'call_id' => $best['id'] ?? null,
-                'lds_id'  => $best['lds_id'] ?? null,
-                'cst_id'  => $best['cst_id'] ?? null,
-                'CallDate' => $best['CallDate'] ?? null,
-            ];
-        }
+        // findLinkedCall defined in efficiency helpers above
 
         // Get employee name for lpId filtering (if lpId is provided)
-        $scorecardFilterEmployeeName = null;
-        if ($lpId !== null && $lpId > 0) {
+        if ($lpId !== null && $lpId > 0 && $scorecardFilterEmployeeName === null) {
             $empNameQuery = "SELECT FirstName, LastName FROM emp_Employees WHERE id = " . $lpId;
             $empNameResult = curlCall("$endpoint/lp/customReport.php?rptSQL=" . urlencode($empNameQuery));
             if (!empty($empNameResult) && isset($empNameResult[0]['FirstName']) && isset($empNameResult[0]['LastName'])) {
@@ -1222,8 +1477,9 @@ $holidays = [
                 $dispositions = loadDispositionsByDescr($endpoint);
             }
             $setterLPEmployeeIdsList = implode(',', $setterLPEmployeeIds);
-            $settersAppointmentsQuery = "SELECT app_Appointments.id, app_Appointments.lds_id, app_Appointments.cst_id, app_Appointments.ApptDate, app_Appointments.Dsp_ID, app_Appointments.SetBy, app_Appointments.ApptSet, app_Appointments.Issued, app_Appointments.NetIssued, emp_Employees.FirstName, emp_Employees.LastName FROM app_Appointments LEFT JOIN emp_Employees ON app_Appointments.SetBy = emp_Employees.id WHERE app_Appointments.ApptDate BETWEEN '$start' AND '$end' AND emp_Employees.Dialer = '1' AND Dsp_ID NOT IN ('Set') AND app_Appointments.SetBy IN ($setterLPEmployeeIdsList) ORDER BY app_Appointments.id DESC";
-            $settersAppointments = curlCall("$endpoint/lp/customReport.php?rptSQL=" . urlencode($settersAppointmentsQuery));
+            $settersAppointments = ccFetchLpReportChunked($endpoint, function($chunkStart, $chunkEnd) use ($setterLPEmployeeIdsList) {
+                return "SELECT app_Appointments.id, app_Appointments.lds_id, app_Appointments.cst_id, app_Appointments.ApptDate, app_Appointments.Dsp_ID, app_Appointments.SetBy, app_Appointments.ApptSet, app_Appointments.Issued, app_Appointments.NetIssued, emp_Employees.FirstName, emp_Employees.LastName FROM app_Appointments LEFT JOIN emp_Employees ON app_Appointments.SetBy = emp_Employees.id WHERE app_Appointments.ApptDate BETWEEN '$chunkStart' AND '$chunkEnd' AND emp_Employees.Dialer = '1' AND Dsp_ID NOT IN ('Set') AND app_Appointments.SetBy IN ($setterLPEmployeeIdsList) ORDER BY app_Appointments.id DESC";
+            }, $start, $end);
             if(!is_array($settersAppointments)){
                 $settersAppointments = [];
             }
@@ -1268,7 +1524,19 @@ $holidays = [
     $responseData['secondaryConfirmersScorecards'] = [];
     $responseData['secondarySettersAppointments'] = [];
     
-    if(array_key_exists('secondaryDateRange', $_GET)){
+    if(!$skipSecondary && array_key_exists('secondaryDateRange', $_GET)){
+        $rangesMatch = (!$secondaryOnly && $start === $secondaryStart && $end === $secondaryEnd);
+        if ($rangesMatch) {
+            $responseData['secondarySettersCalls'] = $responseData['settersCalls'] ?? [];
+            $responseData['secondaryConfirmersCalls'] = $responseData['confirmersCalls'] ?? [];
+            $responseData['secondaryGspCalls'] = $responseData['gspCalls'] ?? [];
+            $responseData['secondarySettersHours'] = $responseData['settersHours'] ?? [];
+            $responseData['secondaryConfirmersHours'] = $responseData['confirmersHours'] ?? [];
+            $responseData['secondaryGspHours'] = $responseData['gspHours'] ?? [];
+            $responseData['secondarySettersScorecards'] = $responseData['settersScorecards'] ?? [];
+            $responseData['secondaryConfirmersScorecards'] = $responseData['confirmersScorecards'] ?? [];
+            $responseData['secondarySettersAppointments'] = $responseData['settersAppointments'] ?? [];
+        } else {
         // STEP 1: Get unique deputy IDs for secondary date range
         $secondaryDeputyMappingQuery = "SELECT DISTINCT emp_user_12, emp_id, FirstName, LastName FROM cls_Calls LEFT JOIN emp_Employees ON emp_id = emp_Employees.id WHERE CallDate BETWEEN '$secondaryStart' AND '$secondaryEnd' AND ResultCode NOT LIKE '%ND%' AND Dialer = 'True' AND emp_user_12 > 0";
         
@@ -1278,6 +1546,9 @@ $holidays = [
         }
         
         $secondaryDeputyMappingResults = curlCall("$endpoint/lp/customReport.php?rptSQL=" . urlencode($secondaryDeputyMappingQuery));
+        if (!is_array($secondaryDeputyMappingResults)) {
+            $secondaryDeputyMappingResults = [];
+        }
         
         // Build mapping and collect deputy IDs
         $secondaryDeputyToLPMapping = [];
@@ -1301,8 +1572,12 @@ $holidays = [
         $secondaryGspTimesheetEmployees = []; // Hours for employees clocked into GSP operational unit
         $secondaryDeputyIDOperationalUnits = []; // Track operational units per deputy ID
         
+        $secondaryTimesheetsByDeputy = ccFetchTimesheetsByDeputy($endpoint, $secondaryDeputyIDs, $secondaryStart, $secondaryEnd);
         foreach($secondaryDeputyIDs as $deputyID){
-            $theseTimesheets = curlCall("$endpoint/deputy/getTimesheets.php?startDate=$secondaryStart&endDate=$secondaryEnd&id=" . intval($deputyID));
+            $theseTimesheets = $secondaryTimesheetsByDeputy[intval($deputyID)] ?? [];
+            if (!is_array($theseTimesheets)) {
+                $theseTimesheets = [];
+            }
             foreach($theseTimesheets as $timesheet){
                 // Determine if this timesheet is for a setter, confirmer, or GSP based on operational unit
                 $operationalUnitName = null;
@@ -1420,25 +1695,27 @@ $holidays = [
         $secondaryConfirmersCalls = [];
         $secondaryGspCalls = [];
         
-        // Fetch secondary setters calls - only for employees clocked into Setter operational unit
+        // Fetch secondary calls in parallel month chunks for long ranges
+        $secondarySettersCalls = [];
+        $secondaryGspCalls = [];
+        $secondaryConfirmersCalls = [];
         if(!empty($secondarySettersDeputyIDs)){
             $secondarySettersDeputyIdsList = implode(',', $secondarySettersDeputyIDs);
-            $secondarySettersCallsQuery = "SELECT emp_user_12, emp_id, LastName, cls_Calls.id as id, FirstName, CallDate, ResultCode, cty_id, Connected, Pitched, Positive, qualified, lds_Leads.ApptSet, lds_Leads.Issued, cls_Calls.lds_id, cls_Calls.cst_id, cls_Calls.cqd_id FROM cls_Calls LEFT JOIN clr_CallResults ON ResultCode = clr_CallResults.id LEFT JOIN emp_Employees ON emp_id = emp_Employees.id LEFT JOIN lds_Leads ON cls_Calls.lds_id = lds_Leads.id LEFT JOIN srs_SourceSubs ON lds_Leads.srs_id = srs_SourceSubs.id WHERE CallDate BETWEEN '$secondaryStart' AND '$secondaryEnd' AND ResultCode NOT IN ('*ND', 'TXT') AND Dialer = 'True' AND emp_user_12 IN ($secondarySettersDeputyIdsList) AND cty_id NOT IN ('C', 'IPP')$excludeGspCclSql";
-            $secondarySettersCalls = curlCall("$endpoint/lp/customReport.php?rptSQL=" . urlencode($secondarySettersCallsQuery));
+            $secondarySettersCalls = ccFetchLpReportChunked($endpoint, function($chunkStart, $chunkEnd) use ($secondarySettersDeputyIdsList, $excludeGspCclSql) {
+                return "SELECT emp_user_12, emp_id, LastName, cls_Calls.id as id, FirstName, CallDate, ResultCode, cty_id, Connected, Pitched, Positive, qualified, lds_Leads.ApptSet, lds_Leads.Issued, cls_Calls.lds_id, cls_Calls.cst_id, cls_Calls.cqd_id FROM cls_Calls LEFT JOIN clr_CallResults ON ResultCode = clr_CallResults.id LEFT JOIN emp_Employees ON emp_id = emp_Employees.id LEFT JOIN lds_Leads ON cls_Calls.lds_id = lds_Leads.id LEFT JOIN srs_SourceSubs ON lds_Leads.srs_id = srs_SourceSubs.id WHERE CallDate BETWEEN '$chunkStart' AND '$chunkEnd' AND ResultCode NOT IN ('*ND', 'TXT') AND Dialer = 'True' AND emp_user_12 IN ($secondarySettersDeputyIdsList) AND cty_id NOT IN ('C', 'IPP')$excludeGspCclSql";
+            }, $secondaryStart, $secondaryEnd);
         }
-        
-        // Fetch secondary GSP calls - only for employees clocked into GSP operational unit
         if(!empty($secondaryGspDeputyIDs)){
             $secondaryGspDeputyIdsList = implode(',', $secondaryGspDeputyIDs);
-            $secondaryGspCallsQuery = "SELECT emp_user_12, emp_id, LastName, cls_Calls.id as id, FirstName, CallDate, ResultCode, cty_id, Connected, Pitched, Positive, qualified, lds_Leads.ApptSet, lds_Leads.Issued, cls_Calls.lds_id, cls_Calls.cst_id, cls_Calls.cqd_id FROM cls_Calls LEFT JOIN clr_CallResults ON ResultCode = clr_CallResults.id LEFT JOIN emp_Employees ON emp_id = emp_Employees.id LEFT JOIN lds_Leads ON cls_Calls.lds_id = lds_Leads.id LEFT JOIN srs_SourceSubs ON lds_Leads.srs_id = srs_SourceSubs.id WHERE CallDate BETWEEN '$secondaryStart' AND '$secondaryEnd' AND ResultCode NOT IN ('*ND', 'TXT') AND Dialer = 'True' AND emp_user_12 IN ($secondaryGspDeputyIdsList)$gspCallsFilterSql";
-            $secondaryGspCalls = curlCall("$endpoint/lp/customReport.php?rptSQL=" . urlencode($secondaryGspCallsQuery));
+            $secondaryGspCalls = ccFetchLpReportChunked($endpoint, function($chunkStart, $chunkEnd) use ($secondaryGspDeputyIdsList, $gspCallsFilterSql) {
+                return "SELECT emp_user_12, emp_id, LastName, cls_Calls.id as id, FirstName, CallDate, ResultCode, cty_id, Connected, Pitched, Positive, qualified, lds_Leads.ApptSet, lds_Leads.Issued, cls_Calls.lds_id, cls_Calls.cst_id, cls_Calls.cqd_id FROM cls_Calls LEFT JOIN clr_CallResults ON ResultCode = clr_CallResults.id LEFT JOIN emp_Employees ON emp_id = emp_Employees.id LEFT JOIN lds_Leads ON cls_Calls.lds_id = lds_Leads.id LEFT JOIN srs_SourceSubs ON lds_Leads.srs_id = srs_SourceSubs.id WHERE CallDate BETWEEN '$chunkStart' AND '$chunkEnd' AND ResultCode NOT IN ('*ND', 'TXT') AND Dialer = 'True' AND emp_user_12 IN ($secondaryGspDeputyIdsList)$gspCallsFilterSql";
+            }, $secondaryStart, $secondaryEnd);
         }
-        
-        // Fetch secondary confirmers calls - only for employees clocked into Confirmer operational unit
         if(!empty($secondaryConfirmersDeputyIDs)){
             $secondaryConfirmersDeputyIdsList = implode(',', $secondaryConfirmersDeputyIDs);
-            $secondaryConfirmersCallsQuery = "SELECT emp_user_12, emp_id, LastName, cls_Calls.id as id, FirstName, CallDate, ResultCode, cty_id, Connected, Pitched, Positive, qualified, lds_Leads.ApptSet, lds_Leads.Issued, cls_Calls.cqd_id FROM cls_Calls LEFT JOIN clr_CallResults ON ResultCode = clr_CallResults.id LEFT JOIN emp_Employees ON emp_id = emp_Employees.id LEFT JOIN lds_Leads ON cls_Calls.lds_id = lds_Leads.id LEFT JOIN srs_SourceSubs ON lds_Leads.srs_id = srs_SourceSubs.id WHERE CallDate BETWEEN '$secondaryStart' AND '$secondaryEnd' AND ResultCode NOT IN ('*ND', 'TXT') AND Dialer = 'True' AND emp_user_12 IN ($secondaryConfirmersDeputyIdsList) AND cty_id = 'C'$excludeGspCclSql";
-            $secondaryConfirmersCalls = curlCall("$endpoint/lp/customReport.php?rptSQL=" . urlencode($secondaryConfirmersCallsQuery));
+            $secondaryConfirmersCalls = ccFetchLpReportChunked($endpoint, function($chunkStart, $chunkEnd) use ($secondaryConfirmersDeputyIdsList, $excludeGspCclSql) {
+                return "SELECT emp_user_12, emp_id, LastName, cls_Calls.id as id, FirstName, CallDate, ResultCode, cty_id, Connected, Pitched, Positive, qualified, lds_Leads.ApptSet, lds_Leads.Issued, cls_Calls.cqd_id FROM cls_Calls LEFT JOIN clr_CallResults ON ResultCode = clr_CallResults.id LEFT JOIN emp_Employees ON emp_id = emp_Employees.id LEFT JOIN lds_Leads ON cls_Calls.lds_id = lds_Leads.id LEFT JOIN srs_SourceSubs ON lds_Leads.srs_id = srs_SourceSubs.id WHERE CallDate BETWEEN '$chunkStart' AND '$chunkEnd' AND ResultCode NOT IN ('*ND', 'TXT') AND Dialer = 'True' AND emp_user_12 IN ($secondaryConfirmersDeputyIdsList) AND cty_id = 'C'$excludeGspCclSql";
+            }, $secondaryStart, $secondaryEnd);
         }
 
         // STEP 5: Process secondary setters calls (already filtered by operational unit at SQL level)
@@ -1569,22 +1846,51 @@ $holidays = [
         $responseData['secondaryConfirmersHours'] = array_values($secondaryConfirmersTimesheetEmployees);
         $responseData['secondaryGspHours'] = array_values($secondaryGspTimesheetEmployees);
 
-        // Fetch secondary scorecards
+        // Fetch secondary scorecards (chunk long windows — YTD JSON date scans are expensive)
+        if (!isset($integrityDB)) {
+            $integrityDB = new db(
+                'dme_v2_integrity',
+                '134.209.125.255',
+                'integrity',
+                'IvstNnK29kSE3l2T8mPl'
+            );
+        }
         $secondaryQueryEndDate = date('Y-m-d', strtotime($secondaryEnd . ' -1 day'));
-        
-        $secondarySettersScorecardsQuery = "SELECT id, form_id, status, created_at, updated_at, variables_used, form_data, responses FROM form_instances 
-            WHERE DATE(STR_TO_DATE(variables_used->>'$.CallDate','%Y-%m-%d %H:%i:%s.%f')) BETWEEN '$secondaryStart' AND '$secondaryQueryEndDate'
-            AND form_id = 11 
-            AND status = 'completed'";
-        
-        $secondarySettersScorecardsRaw = $integrityDB->query($secondarySettersScorecardsQuery);
-        
-        $secondaryConfirmersScorecardsQuery = "SELECT id, form_id, status, created_at, updated_at, variables_used, form_data, responses FROM form_instances 
-            WHERE DATE(STR_TO_DATE(variables_used->>'$.CallDate','%Y-%m-%d %H:%i:%s.%f')) BETWEEN '$secondaryStart' AND '$secondaryQueryEndDate'
-            AND form_id = 12 
-            AND status = 'completed'";
-        
-        $secondaryConfirmersScorecardsRaw = $integrityDB->query($secondaryConfirmersScorecardsQuery);
+        $secondaryScorecardChunks = ccDateRangeDayCount($secondaryStart, $secondaryEnd) > 45
+            ? ccBuildDateChunks($secondaryStart, date('Y-m-d', strtotime($secondaryQueryEndDate . ' +1 day')), 31)
+            : [[$secondaryStart, date('Y-m-d', strtotime($secondaryQueryEndDate . ' +1 day'))]];
+
+        $secondarySettersScorecardsRaw = [];
+        $secondaryConfirmersScorecardsRaw = [];
+        foreach ($secondaryScorecardChunks as $scoreChunk) {
+            $chunkStart = $scoreChunk[0];
+            $chunkEndInclusive = date('Y-m-d', strtotime($scoreChunk[1] . ' -1 day'));
+            if (strtotime($chunkEndInclusive) < strtotime($chunkStart)) {
+                continue;
+            }
+
+            $secondarySettersScorecardsQuery = "SELECT id, form_id, status, created_at, updated_at, variables_used, form_data, responses FROM form_instances 
+                WHERE DATE(STR_TO_DATE(variables_used->>'$.CallDate','%Y-%m-%d %H:%i:%s.%f')) BETWEEN '$chunkStart' AND '$chunkEndInclusive'
+                AND form_id = 11 
+                AND status = 'completed'";
+            $settersChunkRows = $integrityDB->query($secondarySettersScorecardsQuery);
+            if (is_array($settersChunkRows)) {
+                foreach ($settersChunkRows as $row) {
+                    $secondarySettersScorecardsRaw[] = $row;
+                }
+            }
+
+            $secondaryConfirmersScorecardsQuery = "SELECT id, form_id, status, created_at, updated_at, variables_used, form_data, responses FROM form_instances 
+                WHERE DATE(STR_TO_DATE(variables_used->>'$.CallDate','%Y-%m-%d %H:%i:%s.%f')) BETWEEN '$chunkStart' AND '$chunkEndInclusive'
+                AND form_id = 12 
+                AND status = 'completed'";
+            $confirmersChunkRows = $integrityDB->query($secondaryConfirmersScorecardsQuery);
+            if (is_array($confirmersChunkRows)) {
+                foreach ($confirmersChunkRows as $row) {
+                    $secondaryConfirmersScorecardsRaw[] = $row;
+                }
+            }
+        }
 
         // Build (employee + CallDate) indexes for the secondary date range so each scorecard
         // can be linked back to a specific call/prospect.
@@ -1743,19 +2049,20 @@ $holidays = [
                 $dispositions = loadDispositionsByDescr($endpoint);
             }
             $secondarySetterLPEmployeeIdsList = implode(',', $secondarySetterLPEmployeeIds);
-            $secondarySettersAppointmentsQuery = "SELECT app_Appointments.id, app_Appointments.lds_id, app_Appointments.cst_id, 
+            $secondarySettersAppointments = ccFetchLpReportChunked($endpoint, function($chunkStart, $chunkEnd) use ($secondarySetterLPEmployeeIdsList) {
+                return "SELECT app_Appointments.id, app_Appointments.lds_id, app_Appointments.cst_id, 
             app_Appointments.ApptDate, app_Appointments.Dsp_ID, app_Appointments.SetBy, app_Appointments.ApptSet, 
             app_Appointments.Issued, app_Appointments.NetIssued, emp_Employees.FirstName, emp_Employees.LastName, Lds_Leads.Productid, srs_SourceSubs.SourceCode, srs_SourceSubs.Descr
             FROM app_Appointments 
             LEFT JOIN emp_Employees ON app_Appointments.SetBy = emp_Employees.id 
             LEFT JOIN Lds_Leads ON app_Appointments.Lds_ID = Lds_Leads.id
             LEFT JOIN srs_SourceSubs ON Lds_Leads.srs_id = srs_SourceSubs.id
-            WHERE app_Appointments.ApptDate BETWEEN '$secondaryStart' AND '$secondaryEnd' 
+            WHERE app_Appointments.ApptDate BETWEEN '$chunkStart' AND '$chunkEnd' 
             AND CAST(app_Appointments.ApptDate AS date) <= CAST(GETDATE() AS date) 
             AND emp_Employees.Dialer = '1' 
             AND app_Appointments.SetBy IN ($secondarySetterLPEmployeeIdsList) 
             ORDER BY app_Appointments.id DESC";
-            $secondarySettersAppointments = curlCall("$endpoint/lp/customReport.php?rptSQL=" . urlencode($secondarySettersAppointmentsQuery));
+            }, $secondaryStart, $secondaryEnd);
             if(!is_array($secondarySettersAppointments)){
                 $secondarySettersAppointments = [];
             }
@@ -1787,8 +2094,27 @@ $holidays = [
                 'Descr' => $appointment['Descr'] ?? null,
             ];
         }
+        } // end rangesMatch else
     }
     
+    if ($secondaryOnly) {
+        $responseData['stl'] = [];
+        $responseData['levels'] = [];
+        $responseData['lights'] = ['red' => [], 'green' => []];
+        $callQueueDetailQuery = "SELECT id, Descr FROM cqd_CallQueueDetail";
+        $callQueueDetailRows = curlCall("$endpoint/lp/customReport.php?rptSQL=" . urlencode($callQueueDetailQuery));
+        $responseData['callQueueDetails'] = [];
+        if (!empty($callQueueDetailRows)) {
+            foreach ($callQueueDetailRows as $row) {
+                $responseData['callQueueDetails'][] = [
+                    'id' => $row['id'] ?? $row['cqd_id'] ?? null,
+                    'Descr' => $row['Descr'] ?? ''
+                ];
+            }
+        }
+        exit(json_encode($responseData));
+    }
+
     $excludedStlSubsourceIds = [218];
     $excludedStlSubsourceSql = implode(',', array_map('intval', $excludedStlSubsourceIds));
 
