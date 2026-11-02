@@ -665,12 +665,10 @@ const transformApiData = (
   
   // Check if there's confirmers data (only relevant when on confirmers dashboard)
   const hasConfirmersData = dashboardType === 'confirmers' && (totalCalls > 0 || filteredScorecards.length > 0)
-  
-  // Calculate confirmers-specific metrics
-  // Contact Rate: percentage of calls that were connected
-  const contactRate = hasConfirmersData && totalCalls > 0 
-    ? Math.round((totalConnected / totalCalls) * 100) 
-    : 0
+
+  // Confirmers Contact Rate must match Team Members: sum(connections) / sum(dials).
+  // That is the same rollup as setters connectionRate (totalConnected / totalCalls).
+  const contactRate = connectionRate
   
   // Gross Issue Rate: percentage of appointments set that resulted in issues
   const grossIssueRate = hasConfirmersData && totalApptSet > 0
@@ -713,7 +711,7 @@ const transformApiData = (
       checkoutToDialTime: Math.round(avgStl),
     },
     confirmersMetrics: {
-      // Calculate from actual confirmersCalls data, respecting date and employee filters
+      // Contact Rate = Team Members connections ÷ dials (same aggregate totals)
       contactRate,
       grossIssueRate,
       netIssueRate,
@@ -2502,27 +2500,19 @@ export function DashboardContent() {
           </>
         ) : (
           <>
-            {/* Confirmers Metrics Gauges */}
+            {/* Confirmers Metrics Gauges — Contact Rate only */}
             {(!data || !hasDataForCurrentDashboard) ? (
-              <div className="mb-4 grid gap-4 grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 xl:grid-cols-5">
-                {[
-                  "Contact Rate",
-                  "Gross Issue Rate",
-                  "Net Issue Rate",
-                  "1-Leg Rate",
-                  "Scorecard"
-                ].map((title, i) => (
-                  <Card key={i} className="p-4">
-                    <div className="flex flex-col items-center justify-center text-center min-h-[120px]">
-                      <h4 className="text-sm font-medium mb-2">{title}</h4>
-                      <AlertCircle className="h-5 w-5 mb-1 text-muted-foreground" />
-                      <p className="text-xs text-muted-foreground">No data</p>
-                    </div>
-                  </Card>
-                ))}
+              <div className="mb-4 grid gap-4 grid-cols-1 max-w-xs">
+                <Card className="p-4">
+                  <div className="flex flex-col items-center justify-center text-center min-h-[120px]">
+                    <h4 className="text-sm font-medium mb-2">Contact Rate</h4>
+                    <AlertCircle className="h-5 w-5 mb-1 text-muted-foreground" />
+                    <p className="text-xs text-muted-foreground">No data</p>
+                  </div>
+                </Card>
               </div>
             ) : (
-              <div className="mb-4 grid gap-4 grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 xl:grid-cols-5">
+              <div className="mb-4 grid gap-4 grid-cols-1 max-w-xs">
               <CircularGauge
                 title="Contact Rate"
                 value={confirmersMetrics.contactRate}
@@ -2537,69 +2527,7 @@ export function DashboardContent() {
                   { label: "Excellent", min: 85, max: 89.9, color: "#22c55e" },
                   { label: "Elite", min: 90, max: 100, color: "#3b82f6" },
                 ]}
-              />
-              <CircularGauge
-                title="Gross Issue Rate"
-                value={confirmersMetrics.grossIssueRate}
-                max={100}
-                target={81}
-                color={getGaugeColor(confirmersMetrics.grossIssueRate, [69.9, 74.9, 80.9, 84.9])}
-                unit="%"
-                ranges={[
-                  { label: "Bad", min: 0, max: 69.9, color: "#ef4444" },
-                  { label: "Average", min: 70, max: 74.9, color: "#f97316" },
-                  { label: "Good", min: 75, max: 80.9, color: "#eab308" },
-                  { label: "Excellent", min: 81, max: 84.9, color: "#22c55e" },
-                  { label: "Elite", min: 85, max: 100, color: "#3b82f6" },
-                ]}
-              />
-              <CircularGauge
-                title="Net Issue Rate"
-                value={confirmersMetrics.netIssueRate}
-                max={100}
-                target={88}
-                color={getGaugeColor(confirmersMetrics.netIssueRate, [81.9, 85.9, 87.9, 91.9])}
-                unit="%"
-                ranges={[
-                  { label: "Bad", min: 0, max: 81.9, color: "#ef4444" },
-                  { label: "Average", min: 82, max: 85.9, color: "#f97316" },
-                  { label: "Good", min: 86, max: 87.9, color: "#eab308" },
-                  { label: "Excellent", min: 88, max: 91.9, color: "#22c55e" },
-                  { label: "Elite", min: 92, max: 100, color: "#3b82f6" },
-                ]}
-              />
-              <CircularGauge
-                title="1-Leg Rate"
-                value={confirmersMetrics.oneLegsRate}
-                max={100}
-                target={80}
-                color={getGaugeColor(confirmersMetrics.oneLegsRate, [69.9, 74.9, 79.9, 84.9])}
-                unit="%"
-                ranges={[
-                  { label: "Bad", min: 0, max: 69.9, color: "#ef4444" },
-                  { label: "Average", min: 70, max: 74.9, color: "#f97316" },
-                  { label: "Good", min: 75, max: 79.9, color: "#eab308" },
-                  { label: "Excellent", min: 80, max: 84.9, color: "#22c55e" },
-                  { label: "Elite", min: 85, max: 100, color: "#3b82f6" },
-                ]}
-              />
-              <CircularGauge
-                title="Scorecard"
-                value={confirmersMetrics.scorecard}
-                max={100}
-                target={80}
-                color={getGaugeColor(confirmersMetrics.scorecard, [59.9, 69.9, 79.9, 89.9])}
-                unit="%"
-                ranges={[
-                  { label: "Bad", min: 0, max: 59.9, color: "#ef4444" },
-                  { label: "Average", min: 60, max: 69.9, color: "#f97316" },
-                  { label: "Good", min: 70, max: 79.9, color: "#eab308" },
-                  { label: "Excellent", min: 80, max: 89.9, color: "#22c55e" },
-                  { label: "Elite", min: 90, max: 100, color: "#3b82f6" },
-                ]}
-                formula="(Sum of actualTotals ÷ Sum of maxTotals) × 100"
-                showDataIcon={true}
-                onViewData={() => setScorecardTableOpen(true)}
+                formula="(Total Connections ÷ Total Dials) × 100"
               />
             </div>
             )}
